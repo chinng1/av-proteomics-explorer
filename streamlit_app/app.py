@@ -13,7 +13,7 @@ from pathlib import Path
 
 st.set_page_config(
     page_title="A-V Proteomics Explorer",
-    page_icon="🧬",
+    page_icon=None,
     layout="wide",
 )
 
@@ -184,7 +184,7 @@ def av_volcano_fig(df, highlight_genes=None, le_genes=None, title="A-V Volcano")
 # Layout
 # ══════════════════════════════════════════════════════════════════════════════
 
-st.title("🧬 Perioperative A-V Proteomics Explorer")
+st.title("Perioperative A-V Proteomics Explorer")
 st.caption("7,481 proteins · 12 patients · simultaneous arterial + venous blood draws intraoperatively")
 
 # Global gene search in sidebar
@@ -212,7 +212,7 @@ with st.sidebar:
             )
 
 tab_vol, tab_pca, tab_gsea, tab_ecs, tab_skin = st.tabs([
-    "🌋 A-V Volcano", "🔵 PCA", "📊 GSEA", "🧠 ECS / EOS", "🩹 Skin Proteases"
+    "A-V Volcano", "PCA", "GSEA", "ECS / EOS", "Skin Proteases"
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
