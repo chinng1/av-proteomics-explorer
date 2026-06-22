@@ -18,6 +18,21 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Password gate ──────────────────────────────────────────────────────────────
+def _check_password():
+    if st.session_state.get("authenticated"):
+        return
+    st.text_input("Password", type="password", key="_pwd")
+    if st.button("Enter"):
+        if st.session_state["_pwd"] == st.secrets.get("PASSWORD", ""):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+_check_password()
+
 # ── Data paths ─────────────────────────────────────────────────────────────────
 _here = Path(__file__).parent
 # Works both locally (run from repo root or streamlit_app/) and on Streamlit Cloud

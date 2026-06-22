@@ -22,3 +22,6 @@ AP_65plex_byJMR.csv
 __pycache__/
 *.pyc
 .venv/
+
+# ── Streamlit secrets (never commit) ──────────────────────────────────────────
+.streamlit/secrets.toml
