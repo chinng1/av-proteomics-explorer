@@ -10,6 +10,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from pathlib import Path
+from scipy.stats import kruskal
 
 st.set_page_config(
     page_title="A-V Proteomics Explorer",
@@ -265,14 +266,22 @@ with tab_vol:
 # Tab 2 — PCA
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_pca:
+    # ── Axis selectors ────────────────────────────────────────────────────────
+    _pc_opts = [c for c in ["PC1", "PC2", "PC3", "PC4"] if c in loadings.columns] or ["PC1", "PC2", "PC3", "PC4"]
+    _pct_dict = ({f"PC{i+1}": v for i, v in enumerate(pca_var["var_pct"].tolist())}
+                 if not pca_var.empty else {})
+
+    pa1, pa2, _ = st.columns([1, 1, 2])
+    x_pc = pa1.selectbox("X axis", _pc_opts, index=0, key="pca_x")
+    y_pc = pa2.selectbox("Y axis", _pc_opts, index=min(1, len(_pc_opts) - 1), key="pca_y")
+
     col_l, col_r = st.columns(2)
 
     with col_l:
-        st.markdown("#### Protein loadings — PC1 vs PC2")
+        st.markdown(f"#### Protein loadings — {x_pc} vs {y_pc}")
         if loadings.empty:
             st.warning("Run `R_scripts/02_pca.R` to generate PCA outputs.")
         else:
-            pct = pca_var["var_pct"].tolist() if not pca_var.empty else [0, 0, 0, 0]
             df_ld = loadings.copy()
             df_ld["_hit"] = df_ld["EntrezGeneSymbol"].str.upper().isin(searched)
             df_ld["_col"] = np.where(df_ld["_hit"], "Searched", "Other")
@@ -280,32 +289,33 @@ with tab_pca:
             df_ld["_op"]  = np.where(df_ld["_hit"], 1.0, 0.35)
             df_ld["_tip"] = ("<b>" + df_ld["Target"].fillna("") + "</b> ("
                              + df_ld["EntrezGeneSymbol"].fillna("") + ")<br>"
-                             + "PC1: " + df_ld["PC1"].round(4).astype(str)
-                             + "  PC2: " + df_ld["PC2"].round(4).astype(str))
+                             + f"{x_pc}: " + df_ld[x_pc].round(4).astype(str)
+                             + f"  {y_pc}: " + df_ld[y_pc].round(4).astype(str))
             fig_ld = go.Figure()
             for grp, col in [("Other", COL_NS), ("Searched", COL_SRC)]:
                 sub = df_ld[df_ld["_col"] == grp]
                 if sub.empty:
                     continue
                 fig_ld.add_trace(go.Scatter(
-                    x=sub["PC1"], y=sub["PC2"], mode="markers", name=grp,
+                    x=sub[x_pc], y=sub[y_pc], mode="markers", name=grp,
                     text=sub["_tip"], hoverinfo="text",
                     marker=dict(color=col, size=sub["_sz"], opacity=sub["_op"].mean())
                 ))
             for _, r in df_ld[df_ld["_hit"]].iterrows():
-                fig_ld.add_annotation(x=r["PC1"], y=r["PC2"], text=r["EntrezGeneSymbol"],
+                fig_ld.add_annotation(x=r[x_pc], y=r[y_pc], text=r["EntrezGeneSymbol"],
                                       showarrow=True, arrowhead=2,
                                       font=dict(size=10, color=COL_SRC),
                                       bgcolor="white", bordercolor=COL_SRC)
             fig_ld.update_layout(
-                xaxis_title=f"PC1 ({pct[0]}%)", yaxis_title=f"PC2 ({pct[1]}%)",
+                xaxis_title=f"{x_pc} ({_pct_dict.get(x_pc, 0):.1f}%)",
+                yaxis_title=f"{y_pc} ({_pct_dict.get(y_pc, 0):.1f}%)",
                 height=420, margin=dict(t=30))
             st.plotly_chart(fig_ld, use_container_width=True)
 
-        st.markdown("#### Top PC1 contributors")
+        st.markdown(f"#### Top {x_pc} contributors")
         if not loadings.empty:
-            top_ld = (loadings.assign(abs_PC1=loadings["PC1"].abs())
-                      .sort_values("abs_PC1", ascending=False)
+            top_ld = (loadings.assign(**{f"_abs": loadings[x_pc].abs()})
+                      .sort_values("_abs", ascending=False)
                       .head(100)
                       [["EntrezGeneSymbol", "Target", "PC1", "PC2", "PC3", "PC4"]]
                       .rename(columns={"EntrezGeneSymbol": "Gene", "Target": "Protein"}))
@@ -314,20 +324,19 @@ with tab_pca:
                          use_container_width=True, hide_index=True)
 
     with col_r:
-        st.markdown("#### Sample scores — PC1 vs PC2")
+        st.markdown(f"#### Sample scores — {x_pc} vs {y_pc}")
         if pca_sc.empty:
             st.info("Re-run `R_scripts/02_pca.R` to enable this plot.")
         else:
-            pct = pca_var["var_pct"].tolist() if not pca_var.empty else [0, 0, 0, 0]
-            art = pca_sc[pca_sc["draw"] == "Arterial"].set_index("patient")
-            ven = pca_sc[pca_sc["draw"] == "Venous"].set_index("patient")
+            art    = pca_sc[pca_sc["draw"] == "Arterial"].set_index("patient")
+            ven    = pca_sc[pca_sc["draw"] == "Venous"].set_index("patient")
             paired = art.join(ven, lsuffix="_a", rsuffix="_v").dropna()
             fig_sc = go.Figure()
             for sg, col in SURG_COL.items():
                 for draw, sym in [("Arterial", "circle"), ("Venous", "triangle-up")]:
                     sub = pca_sc[(pca_sc["surgery_group"] == sg) & (pca_sc["draw"] == draw)]
                     fig_sc.add_trace(go.Scatter(
-                        x=sub["PC1"], y=sub["PC2"], mode="markers+text",
+                        x=sub[x_pc], y=sub[y_pc], mode="markers+text",
                         name=f"{sg} – {draw}",
                         text=sub["patient"], textposition="top center",
                         marker=dict(color=col, symbol=sym, size=11,
@@ -336,15 +345,94 @@ with tab_pca:
             for pt in paired.index:
                 r = paired.loc[pt]
                 fig_sc.add_shape(type="line",
-                    x0=r["PC1_a"], y0=r["PC2_a"], x1=r["PC1_v"], y1=r["PC2_v"],
+                    x0=r[f"{x_pc}_a"], y0=r[f"{y_pc}_a"],
+                    x1=r[f"{x_pc}_v"], y1=r[f"{y_pc}_v"],
                     line=dict(color="gray", width=1, dash="dot"))
             fig_sc.update_layout(
-                xaxis_title=f"PC1 ({pct[0]}%)", yaxis_title=f"PC2 ({pct[1]}%)",
+                xaxis_title=f"{x_pc} ({_pct_dict.get(x_pc, 0):.1f}%)",
+                yaxis_title=f"{y_pc} ({_pct_dict.get(y_pc, 0):.1f}%)",
                 height=420, margin=dict(t=30),
                 legend=dict(font=dict(size=10)))
             st.plotly_chart(fig_sc, use_container_width=True)
-            st.caption("Lines connect arterial–venous pairs per patient. "
-                       "Surgery type dominates PC1–2; A-V difference appears on PC3–4.")
+            st.caption("Lines connect arterial–venous pairs per patient.")
+
+    # ── Covariate ANOVA section ───────────────────────────────────────────────
+    if not pca_sc.empty:
+        st.markdown("---")
+        st.markdown("#### PC score differences by covariate (Kruskal-Wallis)")
+
+        _cov_map = {
+            "Draw (A vs V)":         "draw",
+            "Surgery type":          "surgery_group",
+            "Sex (male)":            "male",
+            "Obese (BMI > 30)":      "obese",
+            "Hypothermia (< 36°C)":  "hypothermia",
+            "Hyperglycemia (> 150)": "hyperglycemia",
+        }
+        _avail_covs = {k: v for k, v in _cov_map.items() if v in pca_sc.columns}
+
+        if len(_avail_covs) < len(_cov_map):
+            st.caption("Re-run `R_scripts/02_pca.R` and commit `02_pca_scores.csv` "
+                       "to unlock sex/obesity/hypothermia/hyperglycemia covariates.")
+
+        test_label = st.selectbox("Test covariate", list(_avail_covs.keys()), key="pca_cov")
+        test_col   = _avail_covs[test_label]
+
+        df_test = pca_sc.copy()
+        if df_test[test_col].dtype == object or df_test[test_col].dtype.name == "bool":
+            df_test[test_col] = df_test[test_col].map(
+                lambda v: ("Yes" if v else "No") if isinstance(v, bool) else v
+            )
+
+        grp_obj    = df_test.dropna(subset=[test_col]).groupby(test_col)
+        grp_names  = list(grp_obj.groups.keys())
+        _pal       = [COL_ART, COL_VEN, "#27ae60", "#f39c12", "#8e44ad"]
+
+        ac1, ac2 = st.columns([1, 2])
+
+        with ac1:
+            st.markdown("**p-values across PCs**")
+            kw_rows = []
+            for pc in _pc_opts:
+                vals = [g[pc].values for _, g in grp_obj]
+                if len(vals) >= 2 and all(len(v) > 0 for v in vals):
+                    stat, p = kruskal(*vals)
+                    kw_rows.append({"PC": pc, "H": f"{stat:.2f}",
+                                    "p": f"{p:.3g}", "*": "✓" if p < 0.05 else ""})
+                else:
+                    kw_rows.append({"PC": pc, "H": "—", "p": "—", "*": ""})
+            st.dataframe(pd.DataFrame(kw_rows), use_container_width=True, hide_index=True)
+            st.caption(f"Groups: {', '.join(str(g) for g in grp_names)}  |  "
+                       f"N = {len(df_test.dropna(subset=[test_col]))} samples")
+
+        with ac2:
+            st.markdown(f"**{x_pc} scores by {test_label}**")
+            rng     = np.random.default_rng(42)
+            fig_str = go.Figure()
+            for i, (grp_name, grp_df) in enumerate(grp_obj):
+                col    = _pal[i % len(_pal)]
+                jitter = rng.uniform(-0.12, 0.12, len(grp_df))
+                fig_str.add_trace(go.Scatter(
+                    x=np.full(len(grp_df), i) + jitter,
+                    y=grp_df[x_pc].values,
+                    mode="markers",
+                    name=str(grp_name),
+                    text=grp_df["patient"].astype(str) + " (" + grp_df["draw"] + ")",
+                    hoverinfo="text+y",
+                    marker=dict(color=col, size=9, opacity=0.8),
+                ))
+                mean_val = grp_df[x_pc].mean()
+                fig_str.add_shape(type="line",
+                    x0=i - 0.3, x1=i + 0.3, y0=mean_val, y1=mean_val,
+                    line=dict(color=col, width=2.5))
+            fig_str.update_layout(
+                xaxis=dict(tickmode="array", tickvals=list(range(len(grp_names))),
+                           ticktext=[str(g) for g in grp_names], title=test_label),
+                yaxis_title=f"{x_pc} score",
+                height=340, margin=dict(t=10, b=40),
+                showlegend=False,
+            )
+            st.plotly_chart(fig_str, use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

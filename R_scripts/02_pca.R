@@ -20,7 +20,11 @@ pca_df <- as_tibble(pca_res$x[, 1:4]) |>
     patient       = soma_samples$patient,
     draw          = factor(soma_samples$draw, levels = c("Venous", "Arterial")),
     surgery_group = factor(soma_samples$surgery_group),
-    flagged       = soma_samples$flagged
+    flagged       = soma_samples$flagged,
+    male          = soma_samples$male,
+    obese         = soma_samples$obese,
+    hypothermia   = soma_samples$hypothermia,
+    hyperglycemia = soma_samples$hyperglycemia
   )
 
 # Variance explained table
