@@ -1,0 +1,81 @@
+covariate,Target,EntrezGeneSymbol,eos_category,eos_role,logFC,t,P.Value,adj.P.Val
+hyperglycemia,Corticotropin-lipotropin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",3.1200803656375213,7.308781166008628,2.089957601404851e-5,0.03126994563221938
+hyperglycemia,NEC1,PCSK1,Processing,PC1/3: POMC → β-endorphin / ACTH cleavage,0.8271457236305483,3.2641725063891576,0.00801609468458922,0.6448215519936775
+obese,ACTH,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.6958758374217962,2.7646001494471193,0.01667964062126829,0.989924122354332
+hyperglycemia,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,2.637624965926994,2.815371812720811,0.01768060185896005,0.7307656492092826
+obese,Corticotropin-lipotropin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",1.5744756274509435,2.529234199796765,0.02589914566541905,0.989924122354332
+obese,NEC1,PCSK1,Processing,PC1/3: POMC → β-endorphin / ACTH cleavage,0.4978958861334841,2.217639191518644,0.04588288367599432,0.989924122354332
+obese,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,0.2694528922676788,2.0679404856816865,0.06001607176063117,0.989924122354332
+hypothermia,Neprilysin,MME,Degradation,Neprilysin (NEP): primary enkephalin-degrading endopeptidase,0.28810103536742293,2.0724869318178993,0.06152505611093313,0.9653804233353228
+obese,b-Endorphin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.21234457691912864,2.005954679001792,0.0670225815091822,0.989924122354332
+obese,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,1.4773589594402403,1.889414262619897,0.08242405206043349,0.989924122354332
+hyperglycemia,b-Endorphin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.2551638128458745,1.866017568676609,0.09024211252358502,0.993191905993884
+obese,Dynorphin A (1-17),PDYN,Precursor,"Prodynorphin → dynorphin A/B, α-neoendorphin",0.2910188045021235,1.826082876877319,0.09183251976684596,0.989924122354332
+male,PPCE,PREP,Degradation,Prolyl endopeptidase: neuropeptide degradation,-0.9633368449216884,-1.756873522156959,0.10355880822879784,0.999123858326998
+hyperglycemia,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,0.3037120142294028,1.693639047347344,0.11979868108585996,0.993191905993884
+obese,ACE,ACE,Degradation,Angiotensin-converting enzyme: cleaves enkephalin C-terminus,0.2976977679546811,1.592417062688096,0.13643174982586925,0.989924122354332
+hyperglycemia,PPCE,PREP,Degradation,Prolyl endopeptidase: neuropeptide degradation,1.129237101458126,1.530766047990038,0.15568701026591972,0.993191905993884
+obese,Aminopeptidase N,ANPEP,Degradation,Aminopeptidase N (APN/CD13): N-terminal enkephalin cleavage,-0.2177110269421188,-1.4714534920656752,0.1659166075466708,0.989924122354332
+male,Corticotropin-lipotropin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",-0.9778622386999546,-1.368996494411613,0.19526491032975157,0.999123858326998
+hypothermia,PENK,PENK,Precursor,"Proenkephalin → met-enkephalin, leu-enkephalin",0.7187846092878684,1.37137000508463,0.19675519875223824,0.9653804233353228
+male,PENK,PENK,Precursor,"Proenkephalin → met-enkephalin, leu-enkephalin",0.6023463852721347,1.3042116714441152,0.21582881264892212,0.999123858326998
+obese,PPCE,PREP,Degradation,Prolyl endopeptidase: neuropeptide degradation,0.7482931096218598,1.302457441488262,0.21641493575454135,0.989924122354332
+hyperglycemia,PENK,PENK,Precursor,"Proenkephalin → met-enkephalin, leu-enkephalin",0.6999391556899157,1.3100444609626791,0.218403773155852,0.993191905993884
+hypothermia,Aminopeptidase N,ANPEP,Degradation,Aminopeptidase N (APN/CD13): N-terminal enkephalin cleavage,0.21607455755706825,1.2547215893659558,0.2345911106827301,0.9653804233353228
+male,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,0.20420695947212245,1.232159540894969,0.24057799256595588,0.999123858326998
+obese,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,-0.31123227241618046,-1.1816338841212923,0.2595013556788853,0.989924122354332
+male,ACTH,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",-0.35582710212593377,-1.1713482335193752,0.263454443915853,0.999123858326998
+obese,Glycoprotein hormones a-chain,CGA,HPA axis,Glycoprotein hormone alpha chain: pituitary secretory marker,0.17069542719244976,1.0937101348609055,0.2947317483205956,0.989924122354332
+hypothermia,Corticotropin-lipotropin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.7129194381110646,1.0692099632593557,0.30718103928051393,0.9653804233353228
+male,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,-0.147739816567893,-1.0150254035071733,0.3293500704267005,0.999123858326998
+hyperglycemia,PNOC,PNOC,Precursor,Pronociceptin → nociceptin/orphanin FQ (OFQ),0.12927820022274772,1.0197222387328826,0.3308195031398169,0.993191905993884
+hypothermia,PNOC,PNOC,Precursor,Pronociceptin → nociceptin/orphanin FQ (OFQ),0.09620324273642042,0.9619674224069996,0.3559450059241219,0.9653804233353228
+hypothermia,PPCE,PREP,Degradation,Prolyl endopeptidase: neuropeptide degradation,0.3607152705634762,0.9434457349768276,0.36509714683280736,0.9653804233353228
+hyperglycemia,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,-0.16260597106564226,-0.8979252567415498,0.3893850773569008,0.993191905993884
+male,b-Endorphin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",-0.10313423082926762,-0.870509263712843,0.4004410257893496,0.999123858326998
+hypothermia,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,-0.13138120752841168,-0.8655703241789973,0.4045003404355616,0.9653804233353228
+male,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,-0.7420630977504653,-0.8609897920870699,0.4055690463053494,0.999123858326998
+hyperglycemia,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,-0.22074838761328872,-0.8637056015492688,0.4072461035594198,0.993191905993884
+hypothermia,ACE,ACE,Degradation,Angiotensin-converting enzyme: cleaves enkephalin C-terminus,-0.1913497524380799,-0.850416115689086,0.4126696487191957,0.9653804233353228
+obese,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,0.2735836873850753,0.8342182207419964,0.4199276957785192,0.989924122354332
+male,PNOC,PNOC,Precursor,Pronociceptin → nociceptin/orphanin FQ (OFQ),0.07819428848730257,0.8314572562270526,0.4213242530591952,0.999123858326998
+hypothermia,NEC1,PCSK1,Processing,PC1/3: POMC → β-endorphin / ACTH cleavage,0.23425438222722816,0.8119713557034913,0.4335029459463699,0.9653804233353228
+obese,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,-0.3160927333615288,-0.7973561127981387,0.4402353155660847,0.989924122354332
+hypothermia,ACTH,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.2779329441764811,0.773255705182613,0.455169731335055,0.9653804233353228
+hyperglycemia,ACE,ACE,Degradation,Angiotensin-converting enzyme: cleaves enkephalin C-terminus,-0.2073035005080711,-0.7669975680787785,0.46015620756883047,0.993191905993884
+male,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,0.09747429969654164,0.7079185796561976,0.49199339121811103,0.999123858326998
+hypothermia,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,-0.21896628440821717,-0.6986357737198374,0.4988410990057029,0.9653804233353228
+male,NEC1,PCSK1,Processing,PC1/3: POMC → β-endorphin / ACTH cleavage,-0.1766644531339481,-0.6766307283098572,0.5110532899807851,0.999123858326998
+male,ACE,ACE,Degradation,Angiotensin-converting enzyme: cleaves enkephalin C-terminus,-0.1340483761852285,-0.6644891328699554,0.5185321568019763,0.999123858326998
+hypothermia,b-Endorphin,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.07370679413757088,0.6196018599000407,0.547653605830986,0.9687801300670056
+male,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,0.14899350088615518,0.5423430441790091,0.59718531095427,0.999123858326998
+hypothermia,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,0.06246970139346435,0.49483677132944986,0.6300751910110705,0.9779237560070162
+obese,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,0.1678000118052177,0.49233188027049246,0.6310800270675616,0.989924122354332
+hypothermia,Dynorphin A (1-17),PDYN,Precursor,"Prodynorphin → dynorphin A/B, α-neoendorphin",-0.09458579340172749,-0.4895375761872605,0.6337066051376447,0.9780617605066746
+hyperglycemia,Neprilysin,MME,Degradation,Neprilysin (NEP): primary enkephalin-degrading endopeptidase,0.0995543880190834,0.4872836633163022,0.6360976594820396,0.993191905993884
+hypothermia,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.18450269520672505,-0.4821464288147172,0.6388630191686866,0.979730487295552
+obese,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,0.08072293173123328,0.4656943924217729,0.6494521302338887,0.989924122354332
+hyperglycemia,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,-0.2455565956620761,-0.4373166895018637,0.6708319097300424,0.993191905993884
+male,Aminopeptidase N,ANPEP,Degradation,Aminopeptidase N (APN/CD13): N-terminal enkephalin cleavage,0.06870429200158253,0.4302843192148109,0.6743186965152803,0.999123858326998
+male,Glycoprotein hormones a-chain,CGA,HPA axis,Glycoprotein hormone alpha chain: pituitary secretory marker,-0.06992761246940267,-0.42941711469487054,0.6749329710100829,0.999123858326998
+hyperglycemia,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.1895566070983467,-0.42273107512396046,0.6811072286665134,0.993191905993884
+hyperglycemia,Dynorphin A (1-17),PDYN,Precursor,"Prodynorphin → dynorphin A/B, α-neoendorphin",0.09101306103289512,0.38077587922008505,0.7109734092462516,0.993191905993884
+male,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,0.15142640563481138,0.3742644661855963,0.7145232102002956,0.999123858326998
+hyperglycemia,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.15967326446568222,-0.3336602647715468,0.7452723006901513,0.993191905993884
+obese,PENK,PENK,Precursor,"Proenkephalin → met-enkephalin, leu-enkephalin",-0.11901699512462856,-0.24240262953493288,0.81242833177282,0.9952930468440304
+hypothermia,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,0.02384459542814885,0.23058968460468707,0.8217026717875824,0.9953683493421932
+male,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,0.07643388038302637,0.22697089266704504,0.8241416967285249,0.999123858326998
+hyperglycemia,Glycoprotein hormones a-chain,CGA,HPA axis,Glycoprotein hormone alpha chain: pituitary secretory marker,0.05010596314846229,0.2208357868110219,0.82946283049558,0.993191905993884
+male,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.07544120796847385,-0.21938592425275913,0.8299158859448692,0.999123858326998
+obese,CRH,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,-0.02993163898622253,-0.2140583646953932,0.8339571445454055,0.9963584998701666
+hyperglycemia,Aminopeptidase N,ANPEP,Degradation,Aminopeptidase N (APN/CD13): N-terminal enkephalin cleavage,-0.0472671395025824,-0.21380380775983096,0.834803164155248,0.993191905993884
+hyperglycemia,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,-0.049964336029541,-0.21119145312372495,0.8367875875767,0.993191905993884
+hypothermia,BDNF,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.07536488125890661,-0.1988062341695691,0.845929878357716,0.9976186256826516
+obese,Neprilysin,MME,Degradation,Neprilysin (NEP): primary enkephalin-degrading endopeptidase,0.02639522178665797,0.17966543662007645,0.8602982922186989,0.9963584998701666
+hyperglycemia,ACTH,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.07522316549540489,0.17396170369109917,0.8652384303763817,0.993191905993884
+male,Neprilysin,MME,Degradation,Neprilysin (NEP): primary enkephalin-degrading endopeptidase,-0.02517973841133654,-0.1709808446875023,0.86697708642287,0.999123858326998
+male,Dynorphin A (1-17),PDYN,Precursor,"Prodynorphin → dynorphin A/B, α-neoendorphin",-0.02514433708200815,-0.1395766283703837,0.8912196160512355,0.999123858326998
+hypothermia,NEC2,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,0.06206158973182645,0.13382899513775248,0.8958806953817288,0.9989581741104436
+hypothermia,CBPE,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,-0.02153374139459155,-0.11206850046004556,0.9127100426545288,0.9989581741104436
+obese,PNOC,PNOC,Precursor,Pronociceptin → nociceptin/orphanin FQ (OFQ),0.009253835212341,0.09599429306239124,0.9250485281991496,0.9963584998701666
+hypothermia,Glycoprotein hormones a-chain,CGA,HPA axis,Glycoprotein hormone alpha chain: pituitary secretory marker,-0.01193343323305052,-0.06662100490617004,0.948032719284743,0.9989581741104436

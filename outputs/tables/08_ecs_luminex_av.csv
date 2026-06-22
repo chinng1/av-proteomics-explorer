@@ -1,0 +1,13 @@
+luminex_name,mean_arterial,mean_venous,log2FC,p_value,direction,gene_symbol,category,ecs_role
+IP-10(CXCL10),116.41716944320834,136.8514113610104,-0.23312157433880296,0.01078744925467036,Venous > Arterial,CXCL10,ECS-modulated cytokine,Suppressed by CB2 (IFN-γ–driven); top Luminex hit
+TNFa,53.699530342924604,58.01413831604861,-0.11129561438619394,0.020609595400318828,Venous > Arterial,TNF,ECS-modulated cytokine,Suppressed by CB1/CB2 activation
+IL-1b,50.20618577378522,58.36726905326736,-0.21689339776061095,0.025369859822053704,Venous > Arterial,IL1B,ECS-modulated cytokine,Suppressed by CB2; NLRP3 inhibited by CBD
+Fractalkine(CX3CL1),47.48890869515972,49.86319436495933,-0.07024034656495316,0.09100092345331216,Venous > Arterial,CX3CL1,ECS-modulated cytokine,Fractalkine; ECS modulates microglial CX3CR1
+VEGF-A,97.28168766208333,81.87908608275694,0.248394596638603,0.09168053014599112,Arterial > Venous,VEGFA,ECS-modulated cytokine,Angiogenesis; CB1 expressed on endothelium
+IL-10,46.1583128332118,48.77199625544742,-0.0792953870799509,0.2895874244268877,Venous > Arterial,IL10,ECS-modulated cytokine,Upregulated by cannabinoids (anti-inflam.)
+NGFb,49.888888888888886,53.22222222222222,-0.09312944613714785,0.32679956766896595,Venous > Arterial,NGF,Neurotrophin,NGF drives TRPV1 sensitization; ECS feedback
+HGF,148.22806721809374,149.35428433098957,-0.010912638590853606,0.5562984612747348,Venous > Arterial,HGF,NA,NA
+MCP-1(CCL2),158.7868682248611,168.88915477438889,-0.08893076865802063,0.6101201547975077,Venous > Arterial,CCL2,ECS-modulated cytokine,MCP-1; CB2 suppresses monocyte recruitment
+FGF-2,33.72222222222222,35.875,-0.0890232346790649,0.6661372044883171,Venous > Arterial,FGF2,ECS-modulated cytokine,ECS / FGF2 overlap in neural development
+MIF,1111.61328396875,1054.9067725851562,0.07553249796544487,0.7836523115344085,Arterial > Venous,MIF,ECS-modulated cytokine,Macrophage MIF suppressed by cannabinoids
+IL-6,62.73800776305903,66.98323991958334,-0.09431492675738072,0.8444010577369414,Venous > Arterial,IL6,ECS-modulated cytokine,Suppressed by CB2 agonism; CBD reduces IL-6

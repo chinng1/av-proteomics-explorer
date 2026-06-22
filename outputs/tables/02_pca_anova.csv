@@ -1,0 +1,9 @@
+PC,term,Chisq,df,p_value
+PC1,draw,1.441,1,0.23
+PC1,surgery_group,9.665,2,0.00797
+PC2,draw,0,1,0.986
+PC2,surgery_group,7.981,2,0.0185
+PC3,draw,5.427,1,0.0198
+PC3,surgery_group,12.686,2,0.00176
+PC4,draw,5.457,1,0.0195
+PC4,surgery_group,1.021,2,0.6

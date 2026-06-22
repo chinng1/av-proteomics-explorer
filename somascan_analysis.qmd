@@ -1,0 +1,1381 @@
+---
+title: "SomaScan v4.1 Proteomics: Arterial vs. Venous and Covariate Analysis"
+author: "Gregory A. Chinn"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    fig-width: 11
+    fig-height: 7
+editor: visual
+---
+
+## Overview
+
+SomaScan v4.1 PharmaServices run (PLT6574, 2022-02-26) on the same 24 EDTA plasma samples as the Luminex 65-plex study: 12 patients undergoing elective surgery, one simultaneous arterial (`-4`) and venous (`-2`) draw per patient. 7,596 aptamers measured; 7,481 pass ColCheck QC.
+
+**Analyses:**
+
+1.  Sample QC and PCA
+2.  Arterial vs. venous: paired limma, 7,481 proteins
+3.  Gene-set enrichment (GSEA) on the A-V ranking
+4.  Covariate analysis on venous samples (obesity, hypothermia, hyperglycemia, sex)
+5.  A-V gradient by covariate
+6.  Cross-check against Luminex cytokine hits
+
+------------------------------------------------------------------------
+
+## Setup
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(SomaDataIO)
+library(limma)
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(ggrepel)
+library(pheatmap)
+library(RColorBrewer)
+library(fgsea)
+library(msigdbr)
+
+# Resolve project directory
+data_dir <- tryCatch(
+  dirname(rstudioapi::getActiveDocumentContext()$path),
+  error = function(e) "/Users/gregchinn/Desktop/coding projects/Re_ Metabolomics"
+)
+
+# Colour palette used throughout
+col_av    <- c("Arterial" = "#c0392b", "Venous" = "#2980b9")
+col_yn    <- c("Yes" = "#c0392b", "No"  = "#2980b9")
+col_surg  <- setNames(
+  RColorBrewer::brewer.pal(3, "Set2"),
+  c("Head/Neck", "Laparoscopic", "Spine")
+)
+```
+
+## 1. Load Data and QC
+
+```{r}
+#| label: load-adat
+
+# Use the anmlSMP file — hybNorm → medNorm → plateScale → calibration → ANML-QC → ANML-sample
+adat_file <- file.path(
+  data_dir,
+  "SS-229807_v4.1_EDTA_Plasma.hybNorm.medNormInt.plateScale.calibration.anmlQC.qcCheck.anmlSMP.adat"
+)
+soma <- read_adat(adat_file)
+
+cat(sprintf("Total rows: %d | Total aptamers: %d\n", nrow(soma), length(getAnalytes(soma))))
+cat("Sample types:\n"); print(table(soma$SampleType))
+```
+
+```{r}
+#| label: qc-flags
+
+# Analyte-level QC
+analyte_info <- getAnalyteInfo(soma)
+cat("Aptamer ColCheck:\n"); print(table(analyte_info$ColCheck))
+
+# Sample-level QC
+samples_all <- soma |> dplyr::filter(SampleType == "Sample")
+cat("\nSample RowCheck:\n"); print(table(samples_all$RowCheck))
+
+flagged_samples <- samples_all |>
+  dplyr::filter(RowCheck == "FLAG") |>
+  select(SampleId, RowCheck)
+
+cat("\nFlagged sample IDs:\n")
+print(flagged_samples)
+```
+
+```{r}
+#| label: build-analysis-set
+
+# Keep only PASS analytes for all downstream analyses
+pass_analytes <- analyte_info |>
+  dplyr::filter(ColCheck == "PASS") |>
+  pull(AptName)
+
+cat("Analytes retained (ColCheck PASS):", length(pass_analytes), "\n")
+
+# Keep all 24 patient samples; flag the 4 that failed RowCheck
+soma_samples <- samples_all |>
+  mutate(
+    patient = str_extract(SampleId, "\\d{4}"),
+    draw    = if_else(str_ends(SampleId, "-2"), "Venous", "Arterial"),
+    flagged = RowCheck == "FLAG"
+  ) |>
+  arrange(patient, draw)
+
+# log2-transform RFU for all downstream analyses
+expr_all <- soma_samples |>
+  select(all_of(pass_analytes)) |>
+  as.matrix() |>
+  log2()
+
+rownames(expr_all) <- soma_samples$SampleId
+
+cat(sprintf("Expression matrix: %d samples × %d analytes\n",
+            nrow(expr_all), ncol(expr_all)))
+cat("Flagged samples (included but noted):",
+    sum(soma_samples$flagged), "\n")
+```
+
+### Load covariates
+
+```{r}
+#| label: load-covariates
+
+surgery_map <- tribble(
+  ~patient, ~surgery_type,              ~surgery_group,
+  "0179",   "Spine",                    "Spine",
+  "0193",   "Lap. cholecystectomy",     "Laparoscopic",
+  "0209",   "Spine",                    "Spine",
+  "0215",   "Spine",                    "Spine",
+  "0223",   "Craniectomy",              "Head/Neck",
+  "0245",   "Lap. adrenalectomy",       "Laparoscopic",
+  "0250",   "Lap. nephrectomy",         "Laparoscopic",
+  "0254",   "Carotid endarterectomy",   "Head/Neck",
+  "0268",   "Thyroidectomy",            "Head/Neck",
+  "0275",   "Transsphenoidal",          "Head/Neck",
+  "0284",   "Spine",                    "Spine",
+  "0291",   "Spine",                    "Spine"
+)
+
+clean_yn <- function(x) {
+  case_when(
+    str_to_upper(str_trim(x)) == "Y" ~ TRUE,
+    str_to_upper(str_trim(x)) == "N" ~ FALSE,
+    TRUE ~ NA
+  )
+}
+
+covariate_raw <- read_xlsx(
+  file.path(data_dir,
+    "SS-229807_v4.1_EDTA_Plasma - Art vs Venous and surgery type and other covariates after AP2 PK copy.xlsx")
+) |>
+  rename(
+    sample_id     = SampleId,
+    art_iv_same   = `Art&IV on same side (Y/N)`,
+    white_race    = `White Race (Y/N)`,
+    male          = `Male (Y/N)`,
+    obese         = `Obese (BMI>30)`,
+    hypothermia   = `Hypothermia (Temp <36C)`,
+    hyperglycemia = `Hyperglycemia (BG>150)`
+  ) |>
+  mutate(
+    patient = str_extract(sample_id, "\\d{4}"),
+    across(c(art_iv_same, white_race, male, obese, hypothermia, hyperglycemia), clean_yn)
+  ) |>
+  group_by(patient) |>
+  summarise(across(c(art_iv_same, white_race, male, obese, hypothermia, hyperglycemia),
+                   first),
+            .groups = "drop") |>
+  left_join(surgery_map, by = "patient")
+
+soma_samples <- soma_samples |>
+  left_join(covariate_raw, by = "patient")
+```
+
+------------------------------------------------------------------------
+
+## 2. PCA — Sample-Level Overview
+
+```{r}
+#| label: pca
+#| fig-height: 6
+
+pca_res <- prcomp(expr_all, scale. = TRUE)
+pct_var <- round(100 * pca_res$sdev^2 / sum(pca_res$sdev^2), 1)
+
+pca_df <- as_tibble(pca_res$x[, 1:4]) |>
+  mutate(
+    SampleId      = soma_samples$SampleId,
+    patient       = soma_samples$patient,
+    draw          = soma_samples$draw,
+    surgery_group = soma_samples$surgery_group,
+    flagged       = soma_samples$flagged
+  )
+
+p1 <- ggplot(pca_df, aes(PC1, PC2, color = draw, shape = surgery_group,
+                          label = patient)) +
+  geom_line(aes(group = patient), color = "gray70", linewidth = 0.5) +
+  geom_point(aes(size = flagged), alpha = 0.9) +
+  geom_text_repel(size = 2.5, show.legend = FALSE) +
+  scale_color_manual(values = col_av) +
+  scale_shape_manual(values = c("Head/Neck" = 17, "Laparoscopic" = 15, "Spine" = 16)) +
+  scale_size_manual(values = c("FALSE" = 3, "TRUE" = 5), guide = "none") +
+  labs(
+    title    = "PCA: SomaScan 7,481 proteins (log2 RFU, scaled)",
+    subtitle = "Lines connect arterial–venous pairs per patient. Large points = RowCheck FLAG.",
+    x        = paste0("PC1 (", pct_var[1], "%)"),
+    y        = paste0("PC2 (", pct_var[2], "%)"),
+    color    = "Draw", shape = "Surgery"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right")
+
+p2 <- ggplot(pca_df, aes(PC3, PC4, color = draw, shape = surgery_group,
+                          label = patient)) +
+  geom_line(aes(group = patient), color = "gray70", linewidth = 0.5) +
+  geom_point(size = 3, alpha = 0.9) +
+  geom_text_repel(size = 2.5, show.legend = FALSE) +
+  scale_color_manual(values = col_av) +
+  scale_shape_manual(values = c("Head/Neck" = 17, "Laparoscopic" = 15, "Spine" = 16)) +
+  labs(
+    x = paste0("PC3 (", pct_var[3], "%)"),
+    y = paste0("PC4 (", pct_var[4], "%)"),
+    color = "Draw", shape = "Surgery"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right")
+
+print(p1)
+print(p2)
+```
+
+```{r}
+#| label: pca-loadings
+
+# Top drivers of PC1 and PC2
+loadings <- as_tibble(pca_res$rotation[, 1:2], rownames = "AptName") |>
+  left_join(analyte_info |> select(AptName, Target, EntrezGeneSymbol), by = "AptName")
+
+cat("Top PC1 drivers (positive):\n")
+loadings |> slice_max(PC1, n = 10) |>
+  select(Target, EntrezGeneSymbol, PC1) |> print()
+
+cat("\nTop PC1 drivers (negative):\n")
+loadings |> slice_min(PC1, n = 10) |>
+  select(Target, EntrezGeneSymbol, PC1) |> print()
+```
+
+------------------------------------------------------------------------
+
+## 3. Arterial vs. Venous — Paired limma
+
+**Design:** block on patient (12 levels), coefficient of interest = draw (Arterial vs. Venous). Equivalent to a paired t-test across 7,481 proteins simultaneously. BH-FDR correction.
+
+```{r}
+#| label: limma-av
+
+patient_f <- factor(soma_samples$patient)
+draw_f    <- factor(soma_samples$draw, levels = c("Venous", "Arterial"))
+
+design_av <- model.matrix(~ patient_f + draw_f)
+
+fit_av  <- lmFit(t(expr_all), design_av)
+fit_av  <- eBayes(fit_av, trend = TRUE, robust = TRUE)
+
+av_results <- topTable(fit_av, coef = "draw_fArterial",
+                        number = Inf, sort.by = "P") |>
+  rownames_to_column("AptName") |>
+  as_tibble() |>
+  left_join(
+    analyte_info |> select(AptName, Target, TargetFullName,
+                            EntrezGeneSymbol, EntrezGeneID, UniProt, Dilution),
+    by = "AptName"
+  ) |>
+  mutate(
+    direction = if_else(logFC > 0, "Arterial > Venous", "Venous > Arterial"),
+    sig_FDR   = adj.P.Val < 0.05,
+    sig_nom   = P.Value   < 0.05
+  ) |>
+  arrange(adj.P.Val)
+
+cat(sprintf("Proteins tested: %d\n", nrow(av_results)))
+cat(sprintf("Nominal (p < 0.05): %d\n",     sum(av_results$sig_nom)))
+cat(sprintf("FDR-significant (BH < 0.05): %d\n", sum(av_results$sig_FDR)))
+cat(sprintf("\nDirection (FDR hits): "))
+if (sum(av_results$sig_FDR) > 0) {
+  print(av_results |> dplyr::filter(sig_FDR) |> count(direction))
+} else {
+  cat("none at FDR < 0.05\n")
+}
+
+cat("\nTop 30 by adjusted p-value:\n")
+av_results |>
+  select(Target, EntrezGeneSymbol, logFC, AveExpr, t, P.Value, adj.P.Val, direction) |>
+  mutate(across(c(logFC, AveExpr, t, P.Value, adj.P.Val), ~ signif(., 3))) |>
+  print(n = 30)
+```
+
+### Volcano plot
+
+```{r}
+#| label: soma-volcano
+#| fig-height: 8
+
+# Label top 25 by p-value
+label_df <- av_results |> slice_min(P.Value, n = 25)
+
+ggplot(av_results, aes(x = logFC, y = -log10(P.Value),
+                        color = direction, alpha = sig_nom)) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "gray50") +
+  geom_vline(xintercept = 0, color = "gray80") +
+  geom_point(size = 1.2) +
+  geom_text_repel(data = label_df, aes(label = Target),
+                  size = 2.5, max.overlaps = 30, box.padding = 0.35,
+                  show.legend = FALSE) +
+  scale_color_manual(values = c("Arterial > Venous" = "#c0392b",
+                                 "Venous > Arterial" = "#2980b9")) +
+  scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.25), guide = "none") +
+  labs(
+    title    = "SomaScan: Arterial vs. Venous (paired limma, N = 12, 7,481 proteins)",
+    subtitle = "Dashed = nominal p < 0.05. Top 25 labeled.",
+    x        = "log2FC (Arterial / Venous)",
+    y        = "-log10(p-value)",
+    color    = NULL
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+### MA plot
+
+```{r}
+#| label: soma-ma
+
+ggplot(av_results, aes(x = AveExpr, y = logFC, color = sig_nom)) +
+  geom_point(size = 0.8, alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "gray40") +
+  geom_text_repel(data = av_results |> slice_min(P.Value, n = 20),
+                  aes(label = Target), size = 2.5, max.overlaps = 20,
+                  show.legend = FALSE) +
+  scale_color_manual(values = c("FALSE" = "gray70", "TRUE" = "#c0392b"),
+                     labels = c("p ≥ 0.05", "p < 0.05")) +
+  labs(
+    title = "MA plot: SomaScan A-V",
+    x = "Average log2 expression (AveExpr)",
+    y = "log2FC (Arterial / Venous)",
+    color = NULL
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+### Top hit paired trajectories
+
+```{r}
+#| label: soma-paired-dots
+#| fig-height: 8
+
+top_apts <- av_results |> slice_min(P.Value, n = 12) |> pull(AptName)
+top_tgts <- av_results |> slice_min(P.Value, n = 12) |>
+  mutate(label = if_else(is.na(Target) | Target == "", AptName, Target)) |>
+  pull(label)
+
+names(top_tgts) <- top_apts
+
+soma_samples |>
+  select(patient, draw, surgery_group, all_of(top_apts)) |>
+  mutate(across(all_of(top_apts), ~ log2(.))) |>
+  pivot_longer(all_of(top_apts), names_to = "AptName", values_to = "log2_rfu") |>
+  mutate(
+    draw    = factor(draw, levels = c("Venous", "Arterial")),
+    protein = top_tgts[AptName],
+    protein = factor(protein, levels = top_tgts)
+  ) |>
+  ggplot(aes(x = draw, y = log2_rfu, group = patient, color = surgery_group)) +
+  geom_line(alpha = 0.5) +
+  geom_point(size = 2) +
+  facet_wrap(~ protein, scales = "free_y", ncol = 4) +
+  scale_color_manual(values = col_surg) +
+  labs(
+    title = "Top 12 proteins: paired arterial vs. venous per patient",
+    x = NULL, y = "log2 RFU", color = "Surgery"
+  ) +
+  theme_bw(base_size = 10) +
+  theme(legend.position = "bottom")
+```
+
+### Heatmap: top 50 proteins
+
+```{r}
+#| label: soma-heatmap
+#| fig-height: 14
+#| fig-width: 9
+
+top50_apts <- av_results |> slice_min(P.Value, n = 50) |> pull(AptName)
+
+hm_mat <- t(expr_all[, top50_apts])
+colnames(hm_mat) <- soma_samples$SampleId
+
+# Row labels = protein name
+rownames(hm_mat) <- av_results |>
+  dplyr::filter(AptName %in% top50_apts) |>
+  arrange(match(AptName, top50_apts)) |>
+  mutate(label = if_else(is.na(Target) | Target == "", AptName, Target)) |>
+  pull(label)
+
+# Column annotation
+col_anno <- data.frame(
+  Draw    = soma_samples$draw,
+  Surgery = soma_samples$surgery_group,
+  Flagged = ifelse(soma_samples$flagged, "Yes", "No"),
+  row.names = soma_samples$SampleId
+)
+anno_colors <- list(
+  Draw    = col_av,
+  Surgery = col_surg,
+  Flagged = c("Yes" = "orange", "No" = "white")
+)
+
+pheatmap(
+  hm_mat,
+  scale            = "row",
+  annotation_col   = col_anno,
+  annotation_colors = anno_colors,
+  show_colnames    = FALSE,
+  cluster_rows     = TRUE,
+  cluster_cols     = TRUE,
+  color            = colorRampPalette(rev(brewer.pal(9, "RdBu")))(100),
+  fontsize_row     = 7,
+  main             = "Top 50 proteins by A-V p-value (row-scaled log2 RFU)"
+)
+```
+
+------------------------------------------------------------------------
+
+## 4. Gene-Set Enrichment Analysis (GSEA)
+
+Rank all 7,481 PASS proteins by their limma t-statistic (positive = higher in arterial). Run fgsea against MSigDB Hallmark gene sets (H) and KEGG pathways (C2:CP:KEGG). Gene IDs from SomaScan EntrezGeneID annotation.
+
+```{r}
+#| label: gsea-prep
+
+# Build named ranking vector: EntrezGeneID → t-statistic
+# Some aptamers share an Entrez ID (multiple aptamers per protein) → keep max |t|
+rank_df <- av_results |>
+  dplyr::filter(!is.na(EntrezGeneID), EntrezGeneID != "") |>
+  mutate(EntrezGeneID = as.character(EntrezGeneID)) |>
+  group_by(EntrezGeneID) |>
+  slice_max(abs(t), n = 1, with_ties = FALSE) |>
+  ungroup()
+
+ranked_vec <- setNames(rank_df$t, rank_df$EntrezGeneID)
+ranked_vec <- sort(ranked_vec, decreasing = TRUE)
+
+cat("Unique Entrez gene IDs in ranking:", length(ranked_vec), "\n")
+```
+
+```{r}
+#| label: gsea-hallmark
+#| message: false
+
+set.seed(42)
+
+h_sets <- msigdbr(species = "Homo sapiens", category = "H") |>
+  select(gs_name, entrez_gene) |>
+  mutate(entrez_gene = as.character(entrez_gene)) |>
+  group_by(gs_name) |>
+  summarise(genes = list(entrez_gene), .groups = "drop")
+
+hallmark_list <- setNames(h_sets$genes, h_sets$gs_name)
+
+gsea_hallmark <- fgsea(
+  pathways  = hallmark_list,
+  stats     = ranked_vec,
+  minSize   = 10,
+  maxSize   = 500,
+  nPermSimple = 10000
+) |>
+  as_tibble() |>
+  arrange(pval)
+
+cat("Hallmark GSEA — nominal hits (p < 0.05):", sum(gsea_hallmark$pval < 0.05), "\n\n")
+gsea_hallmark |>
+  dplyr::filter(pval < 0.05) |>
+  select(pathway, NES, pval, padj, size) |>
+  mutate(across(c(NES, pval, padj), ~ signif(., 3))) |>
+  print(n = 30)
+```
+
+```{r}
+#| label: gsea-kegg
+#| message: false
+
+kegg_sets <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:KEGG_LEGACY") |>
+  select(gs_name, entrez_gene) |>
+  mutate(entrez_gene = as.character(entrez_gene)) |>
+  group_by(gs_name) |>
+  summarise(genes = list(entrez_gene), .groups = "drop")
+
+kegg_list <- setNames(kegg_sets$genes, kegg_sets$gs_name)
+
+gsea_kegg <- fgsea(
+  pathways    = kegg_list,
+  stats       = ranked_vec,
+  minSize     = 10,
+  maxSize     = 500,
+  nPermSimple = 10000
+) |>
+  as_tibble() |>
+  arrange(pval)
+
+cat("KEGG GSEA — nominal hits (p < 0.05):", sum(gsea_kegg$pval < 0.05), "\n\n")
+gsea_kegg |>
+  dplyr::filter(pval < 0.05) |>
+  select(pathway, NES, pval, padj, size) |>
+  mutate(across(c(NES, pval, padj), ~ signif(., 3))) |>
+  print(n = 30)
+```
+
+### GSEA enrichment plot: top pathways
+
+```{r}
+#| label: gsea-barplot
+#| fig-height: 8
+
+all_gsea <- bind_rows(
+  gsea_hallmark |> mutate(collection = "Hallmark"),
+  gsea_kegg     |> mutate(collection = "KEGG")
+) |>
+  dplyr::filter(pval < 0.05) |>
+  mutate(
+    short_name  = str_replace_all(pathway, "HALLMARK_|KEGG_", "") |>
+                  str_replace_all("_", " ") |>
+                  str_to_title(),
+    direction   = if_else(NES > 0, "Enriched in Arterial", "Enriched in Venous")
+  ) |>
+  arrange(NES)
+
+if (nrow(all_gsea) > 0) {
+  ggplot(all_gsea, aes(x = NES, y = reorder(short_name, NES),
+                        fill = direction, alpha = -log10(pval))) +
+    geom_col() +
+    geom_vline(xintercept = 0, color = "gray30") +
+    scale_fill_manual(values = c("Enriched in Arterial" = "#c0392b",
+                                  "Enriched in Venous"   = "#2980b9")) +
+    scale_alpha_continuous(range = c(0.4, 1)) +
+    facet_wrap(~ collection, scales = "free_y") +
+    labs(
+      title = "GSEA: A-V ranking — nominal hits (p < 0.05)",
+      x = "Normalized Enrichment Score (positive = enriched in arterial)",
+      y = NULL, fill = NULL
+    ) +
+    theme_bw(base_size = 11) +
+    theme(legend.position = "bottom")
+} else {
+  cat("No pathways reach nominal significance.\n")
+}
+```
+
+------------------------------------------------------------------------
+
+## 5. Covariate Analysis — Protein Levels by Patient Characteristics
+
+**Method:** Venous samples only (N = 12). For each binary covariate, fit a limma linear model (expression \~ covariate) and apply eBayes. Present top hits and a summary heatmap. All results are hypothesis-generating; N = 12 is underpowered for 7,481-analyte testing.
+
+```{r}
+#| label: soma-cov-setup
+
+# Venous samples only
+ven_idx      <- soma_samples$draw == "Venous"
+soma_ven     <- soma_samples[ven_idx, ]
+expr_ven     <- expr_all[ven_idx, ]
+
+binary_covariates <- c("obese", "hypothermia", "hyperglycemia", "male")
+
+run_soma_covariate <- function(expr_mat, sample_df, cov_name, analyte_info) {
+  group  <- sample_df[[cov_name]]
+  keep   <- !is.na(group)
+
+  if (sum(keep) < 6 || length(unique(group[keep])) < 2) {
+    message("Skipping ", cov_name, ": insufficient non-NA observations")
+    return(NULL)
+  }
+
+  design_cov <- model.matrix(~ group[keep])
+  fit_cov    <- lmFit(t(expr_mat[keep, ]), design_cov)
+  fit_cov    <- eBayes(fit_cov, trend = TRUE, robust = TRUE)
+
+  topTable(fit_cov, coef = 2, number = Inf, sort.by = "P") |>
+    rownames_to_column("AptName") |>
+    as_tibble() |>
+    left_join(analyte_info |> select(AptName, Target, EntrezGeneSymbol, UniProt),
+              by = "AptName") |>
+    mutate(
+      covariate = cov_name,
+      n_pos     = sum(group[keep] == TRUE,  na.rm = TRUE),
+      n_neg     = sum(group[keep] == FALSE, na.rm = TRUE)
+    ) |>
+    arrange(P.Value)
+}
+
+cov_results_list <- map(
+  binary_covariates,
+  ~ run_soma_covariate(expr_ven, soma_ven, .x, analyte_info)
+)
+names(cov_results_list) <- binary_covariates
+
+cov_results_all <- bind_rows(cov_results_list)
+
+cat("Nominal covariate hits (p < 0.05) per covariate:\n")
+cov_results_all |>
+  dplyr::filter(P.Value < 0.05) |>
+  count(covariate) |>
+  print()
+```
+
+### Top hits per covariate
+
+```{r}
+#| label: soma-cov-top
+
+cov_results_all |>
+  dplyr::filter(P.Value < 0.05) |>
+  group_by(covariate) |>
+  slice_min(P.Value, n = 10) |>
+  select(covariate, Target, EntrezGeneSymbol, logFC, t, P.Value, adj.P.Val, n_pos, n_neg) |>
+  mutate(across(c(logFC, t, P.Value, adj.P.Val), ~ signif(., 3))) |>
+  ungroup() |>
+  print(n = 80)
+```
+
+### Heatmap: –log10(p) across all covariates
+
+```{r}
+#| label: soma-cov-heatmap
+#| fig-height: 14
+#| fig-width: 9
+
+hit_apts <- cov_results_all |>
+  dplyr::filter(P.Value < 0.05) |>
+  pull(AptName) |>
+  unique()
+
+if (length(hit_apts) > 0) {
+  hm_cov <- cov_results_all |>
+    dplyr::filter(AptName %in% hit_apts) |>
+    mutate(
+      label       = if_else(is.na(Target) | Target == "", AptName, Target),
+      neg_log10_p = pmin(-log10(P.Value), 4)
+    ) |>
+    group_by(covariate, label) |>
+    summarise(neg_log10_p = max(neg_log10_p), .groups = "drop") |>
+    pivot_wider(names_from = covariate, values_from = neg_log10_p, values_fill = 0) |>
+    column_to_rownames("label") |>
+    as.matrix()
+
+  pheatmap(
+    hm_cov,
+    color        = colorRampPalette(c("white", "#f7dc6f", "#c0392b"))(50),
+    breaks       = seq(0, 4, length.out = 51),
+    cluster_rows = TRUE,
+    cluster_cols = FALSE,
+    fontsize_row = 6,
+    fontsize_col = 9,
+    main         = "–log10(p) by protein and covariate (venous; capped at 4)\nAll exploratory: N = 12",
+    border_color = NA,
+    angle_col    = 45
+  )
+} else {
+  cat("No nominal hits across covariates.\n")
+}
+```
+
+### Surgery type: Kruskal-Wallis on top A-V hits
+
+```{r}
+#| label: soma-surgery
+#| fig-height: 8
+
+# Use top 9 A-V hits for surgery comparison (venous samples)
+top9_apts  <- av_results |> slice_min(P.Value, n = 9) |> pull(AptName)
+top9_tgts  <- av_results |> slice_min(P.Value, n = 9) |>
+  mutate(label = if_else(is.na(Target) | Target == "", AptName, Target)) |>
+  pull(label)
+names(top9_tgts) <- top9_apts
+
+kw_surgery <- map_dfr(top9_apts, function(apt) {
+  y  <- expr_ven[, apt]
+  kw <- kruskal.test(y ~ soma_ven$surgery_group)
+  tibble(AptName = apt, p_kruskal = kw$p.value)
+})
+
+soma_ven |>
+  select(patient, surgery_group, all_of(top9_apts)) |>
+  pivot_longer(all_of(top9_apts), names_to = "AptName", values_to = "log2_rfu") |>
+  left_join(kw_surgery, by = "AptName") |>
+  mutate(protein = top9_tgts[AptName],
+         protein = paste0(protein, "\n(KW p=", signif(p_kruskal, 2), ")"),
+         protein = factor(protein)) |>
+  ggplot(aes(x = surgery_group, y = log2_rfu, color = surgery_group)) +
+  geom_jitter(width = 0.15, size = 2.5, alpha = 0.8) +
+  stat_summary(fun = median, geom = "crossbar", width = 0.5,
+               color = "black", linewidth = 0.5) +
+  facet_wrap(~ protein, scales = "free_y", ncol = 3) +
+  scale_color_manual(values = col_surg) +
+  labs(
+    title = "Top 9 A-V proteins by surgery type (venous, log2 RFU)",
+    x = NULL, y = "log2 RFU", color = "Surgery"
+  ) +
+  theme_bw(base_size = 10) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+------------------------------------------------------------------------
+
+## 6. Arterial–Venous Gradient by Covariate
+
+Compute the per-patient A-V delta (log2 arterial RFU − log2 venous RFU) for each protein. Test delta against each binary covariate (limma linear model; single-sample design — less stable than the A-V analysis; treat as exploratory).
+
+```{r}
+#| label: soma-delta
+
+# Ensure arterial and venous are aligned by patient
+art_soma <- soma_samples |> dplyr::filter(draw == "Arterial") |> arrange(patient)
+ven_soma <- soma_samples |> dplyr::filter(draw == "Venous")   |> arrange(patient)
+
+stopifnot(all(art_soma$patient == ven_soma$patient))
+
+expr_art   <- expr_all[art_soma$SampleId, ]
+expr_ven_m <- expr_all[ven_soma$SampleId, ]
+
+delta_mat  <- expr_art - expr_ven_m       # log2 ratio (A - V) per protein
+rownames(delta_mat) <- art_soma$patient
+
+delta_meta <- art_soma |>
+  select(patient, surgery_group, obese, hypothermia, hyperglycemia, male)
+
+cat("A-V delta matrix:", nrow(delta_mat), "patients ×", ncol(delta_mat), "proteins\n")
+```
+
+```{r}
+#| label: soma-delta-tests
+
+run_delta_cov <- function(delta_expr, sample_df, cov_name, analyte_info) {
+  group <- sample_df[[cov_name]]
+  keep  <- !is.na(group)
+
+  if (sum(keep) < 4 || length(unique(group[keep])) < 2) return(NULL)
+
+  design_d <- model.matrix(~ group[keep])
+  fit_d    <- lmFit(t(delta_expr[keep, ]), design_d)
+  fit_d    <- eBayes(fit_d, trend = TRUE, robust = TRUE)
+
+  topTable(fit_d, coef = 2, number = Inf, sort.by = "P") |>
+    rownames_to_column("AptName") |>
+    as_tibble() |>
+    left_join(analyte_info |> select(AptName, Target, EntrezGeneSymbol),
+              by = "AptName") |>
+    mutate(covariate = cov_name) |>
+    arrange(P.Value)
+}
+
+delta_cov_results <- map(
+  binary_covariates,
+  ~ run_delta_cov(delta_mat, delta_meta, .x, analyte_info)
+) |>
+  setNames(binary_covariates) |>
+  bind_rows()
+
+cat("Nominal A-V delta hits (p < 0.05) per covariate:\n")
+delta_cov_results |>
+  dplyr::filter(P.Value < 0.05) |>
+  count(covariate) |>
+  print()
+
+cat("\nTop hits:\n")
+delta_cov_results |>
+  dplyr::filter(P.Value < 0.05) |>
+  group_by(covariate) |>
+  slice_min(P.Value, n = 5) |>
+  select(covariate, Target, EntrezGeneSymbol, logFC, t, P.Value, adj.P.Val) |>
+  mutate(across(c(logFC, t, P.Value, adj.P.Val), ~ signif(., 3))) |>
+  ungroup() |>
+  print(n = 60)
+```
+
+### Delta dot plots
+
+```{r}
+#| label: soma-delta-dots
+#| fig-height: 10
+
+top_delta_hits <- delta_cov_results |>
+  dplyr::filter(P.Value < 0.10) |>
+  group_by(covariate) |>
+  slice_min(P.Value, n = 3) |>
+  ungroup()
+
+if (nrow(top_delta_hits) > 0) {
+  delta_long <- as_tibble(delta_mat, rownames = "patient") |>
+    pivot_longer(-patient, names_to = "AptName", values_to = "delta")
+
+  delta_cov_long <- delta_meta |>
+    pivot_longer(all_of(binary_covariates),
+                 names_to = "covariate", values_to = "group_val")
+
+  plot_delta <- top_delta_hits |>
+    select(covariate, AptName) |>
+    left_join(delta_long, by = "AptName") |>
+    left_join(delta_cov_long, by = c("patient", "covariate")) |>
+    left_join(analyte_info |> select(AptName, Target), by = "AptName") |>
+    dplyr::filter(!is.na(group_val)) |>
+    mutate(
+      group_label = if_else(group_val, "Yes", "No"),
+      protein     = if_else(is.na(Target) | Target == "", AptName, Target),
+      panel_label = paste0(covariate, ": ", protein)
+    )
+
+  if (nrow(plot_delta) > 0) {
+    print(
+      ggplot(plot_delta, aes(x = group_label, y = delta, color = group_label)) +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+        geom_jitter(width = 0.1, size = 2.5, alpha = 0.8) +
+        stat_summary(fun = median, geom = "crossbar", width = 0.4,
+                     color = "black", linewidth = 0.5) +
+        facet_wrap(~ panel_label, scales = "free_y", ncol = 3) +
+        scale_color_manual(values = col_yn) +
+        labs(
+          title = "A-V delta (log2 arterial − venous) by covariate — hits at p < 0.10",
+          x = NULL, y = "log2 A-V delta", color = NULL
+        ) +
+        theme_bw(base_size = 10) +
+        theme(legend.position = "none",
+              strip.text = element_text(size = 7))
+    )
+  } else {
+    cat("No plottable delta data after NA removal.\n")
+  }
+} else {
+  cat("No A-V delta hits reach p < 0.10.\n")
+}
+```
+
+------------------------------------------------------------------------
+
+## 7. Full 65-Plex Luminex vs. SomaScan Comparison
+
+### Re-run Luminex A-V analysis
+
+```{r}
+#| label: luminex-reload
+#| message: false
+
+# Plate map
+plate_map <- tribble(
+  ~unknown_id,  ~patient, ~draw,
+  "Unknown1",   "0179",   "Venous",
+  "Unknown2",   "0193",   "Venous",
+  "Unknown3",   "0209",   "Venous",
+  "Unknown4",   "0215",   "Venous",
+  "Unknown5",   "0179",   "Arterial",
+  "Unknown6",   "0193",   "Arterial",
+  "Unknown7",   "0209",   "Arterial",
+  "Unknown8",   "0215",   "Arterial",
+  "Unknown9",   "0223",   "Venous",
+  "Unknown10",  "0245",   "Venous",
+  "Unknown11",  "0250",   "Venous",
+  "Unknown12",  "0254",   "Venous",
+  "Unknown13",  "0223",   "Arterial",
+  "Unknown14",  "0245",   "Arterial",
+  "Unknown15",  "0250",   "Arterial",
+  "Unknown16",  "0254",   "Arterial",
+  "Unknown17",  "0268",   "Venous",
+  "Unknown18",  "0275",   "Venous",
+  "Unknown19",  "0284",   "Venous",
+  "Unknown20",  "0291",   "Venous",
+  "Unknown21",  "0268",   "Arterial",
+  "Unknown22",  "0275",   "Arterial",
+  "Unknown23",  "0284",   "Arterial",
+  "Unknown24",  "0291",   "Arterial"
+)
+
+lx_raw <- read_csv(
+  file.path(data_dir, "AP_65plex_byJMR.csv"),
+  skip = 54, show_col_types = FALSE
+) |>
+  dplyr::filter(str_starts(Sample, "Unknown"))
+
+lx_cols <- lx_raw |> select(-Location, -Sample, -`Total Events`) |> names()
+
+lx_avg <- lx_raw |>
+  mutate(across(all_of(lx_cols), ~ suppressWarnings(as.numeric(.)))) |>
+  left_join(plate_map, by = c("Sample" = "unknown_id")) |>
+  group_by(patient, draw) |>
+  summarise(across(all_of(lx_cols), ~ mean(., na.rm = TRUE)), .groups = "drop")
+
+lx_art <- lx_avg |> dplyr::filter(draw == "Arterial") |> arrange(patient)
+lx_ven <- lx_avg |> dplyr::filter(draw == "Venous")   |> arrange(patient)
+
+lx_results <- map_dfr(lx_cols, function(cyt) {
+  a <- lx_art[[cyt]]; v <- lx_ven[[cyt]]
+  test <- tryCatch(wilcox.test(a, v, paired = TRUE, exact = FALSE),
+                   error = function(e) list(p.value = NA))
+  tibble(
+    luminex_name  = cyt,
+    log2FC_lx     = log2((mean(a, na.rm=TRUE) + 0.1) / (mean(v, na.rm=TRUE) + 0.1)),
+    p_value_lx    = test$p.value
+  )
+}) |>
+  mutate(p_adj_lx = p.adjust(p_value_lx, method = "BH"))
+
+cat("Luminex results reloaded:", nrow(lx_results), "cytokines\n")
+```
+
+### Map all 65 panel names to gene symbols
+
+```{r}
+#| label: panel-map
+
+# Full 65-plex → gene symbol mapping
+luminex_gene_map <- tribble(
+  ~luminex_name,          ~gene_symbol,
+  "MCP-2(CCL8)",          "CCL8",
+  "IL-2R",                "IL2RA",
+  "MIP-1a(CCL3)",         "CCL3",
+  "SDF-1a",               "CXCL12",
+  "IL-27",                "IL27",
+  "LIF",                  "LIF",
+  "IL-1b",                "IL1B",
+  "IL-2",                 "IL2",
+  "IL-4",                 "IL4",
+  "IL-5",                 "IL5",
+  "IP-10(CXCL10)",        "CXCL10",
+  "IL-6",                 "IL6",
+  "IL-7",                 "IL7",
+  "IL-8(CXCL8)",          "CXCL8",
+  "IL-10",                "IL10",
+  "BLC(CXCL13)",          "CXCL13",
+  "EOTAXIN-2(CCL24)",     "CCL24",
+  "EOTAXIN(CCL11)",       "CCL11",
+  "IL-12p70",             "IL12A",
+  "IL-13",                "IL13",
+  "IL-17A(CTLA-8)",       "IL17A",
+  "IL-31",                "IL31",
+  "SCF",                  "KITLG",
+  "G-CSF(CSF-3)",         "CSF3",
+  "IFNg",                 "IFNG",
+  "GM-CSF",               "CSF2",
+  "TNFa",                 "TNF",
+  "HGF",                  "HGF",
+  "MIP-1b(CCL4)",         "CCL4",
+  "IFNa",                 "IFNA1",
+  "EOTAXIN-3(CCL26)",     "CCL26",
+  "MCP-1(CCL2)",          "CCL2",
+  "IL-9",                 "IL9",
+  "MIF",                  "MIF",
+  "TNFb",                 "LTA",
+  "NGFb",                 "NGF",
+  "MIP-3a(CCL20)",        "CCL20",
+  "I-TAC(CXCL11)",        "CXCL11",
+  "TRAIL",                "TNFSF10",
+  "Fractalkine(CX3CL1)",  "CX3CL1",
+  "GROa(CXCL1)",          "CXCL1",
+  "IL-1a",                "IL1A",
+  "IL-23",                "IL23A",
+  "MMP-1",                "MMP1",
+  "IL-15",                "IL15",
+  "IL-18",                "IL18",
+  "M-CSF",                "CSF1",
+  "MCP-3(CCL7)",          "CCL7",
+  "MIG(CXCL9)",           "CXCL9",
+  "IL-16",                "IL16",
+  "IL-21",                "IL21",
+  "IL-3",                 "IL3",
+  "CD40L",                "CD40LG",
+  "FGF-2",                "FGF2",
+  "IL-22",                "IL22",
+  "VEGF-A",               "VEGFA",
+  "TSLP",                 "TSLP",
+  "IL-20",                "IL20",
+  "ENA-78(CXCL5)",        "CXCL5",
+  "CD30",                 "TNFRSF8",
+  "TNF-RII",              "TNFRSF1B",
+  "BAFF",                 "TNFSF13B",
+  "MDC",                  "CCL22",
+  "APRIL",                "TNFSF13",
+  "TWEAK",                "TNFSF12"
+)
+
+cat("Panel map entries:", nrow(luminex_gene_map), "\n")
+```
+
+### Merge Luminex and SomaScan A-V results
+
+```{r}
+#| label: platform-merge
+
+# For proteins with multiple aptamers, keep the one with the smallest p-value
+soma_best <- av_results |>
+  group_by(EntrezGeneSymbol) |>
+  slice_min(P.Value, n = 1, with_ties = FALSE) |>
+  ungroup()
+
+platform_df <- luminex_gene_map |>
+  left_join(lx_results, by = "luminex_name") |>
+  left_join(
+    soma_best |> select(EntrezGeneSymbol, logFC_soma = logFC,
+                         t_soma = t, P.Value_soma = P.Value,
+                         adj.P.Val_soma = adj.P.Val),
+    by = c("gene_symbol" = "EntrezGeneSymbol")
+  ) |>
+  mutate(
+    in_soma        = !is.na(logFC_soma),
+    dir_lx         = if_else(log2FC_lx  > 0, "Art > Ven", "Ven > Art"),
+    dir_soma       = if_else(logFC_soma > 0, "Art > Ven", "Ven > Art"),
+    concordant     = in_soma & (dir_lx == dir_soma),
+    sig_lx         = p_value_lx < 0.05,
+    sig_soma       = P.Value_soma < 0.05
+  )
+
+cat("Luminex cytokines found in SomaScan:", sum(platform_df$in_soma), "of 65\n")
+cat("Direction concordant:", sum(platform_df$concordant, na.rm=TRUE), "\n")
+cat("Direction discordant:", sum(!platform_df$concordant & platform_df$in_soma, na.rm=TRUE), "\n\n")
+
+platform_df |>
+  dplyr::filter(in_soma) |>
+  select(luminex_name, gene_symbol, log2FC_lx, logFC_soma,
+         p_value_lx, P.Value_soma, concordant) |>
+  mutate(across(c(log2FC_lx, logFC_soma, p_value_lx, P.Value_soma), ~ signif(., 3))) |>
+  arrange(p_value_lx) |>
+  print(n = 65)
+```
+
+### Scatter plot: Luminex log2FC vs SomaScan logFC
+
+```{r}
+#| label: platform-scatter
+#| fig-height: 7
+
+scatter_df <- platform_df |>
+  dplyr::filter(in_soma) |>
+  mutate(
+    sig_category = case_when(
+      sig_lx & sig_soma  ~ "Both p < 0.05",
+      sig_lx             ~ "Luminex only",
+      sig_soma           ~ "SomaScan only",
+      TRUE               ~ "Neither"
+    ),
+    label_pt = if_else(sig_lx | sig_soma, gene_symbol, NA_character_)
+  )
+
+# Pearson r for concordance
+r_val <- cor(scatter_df$log2FC_lx, scatter_df$logFC_soma,
+             use = "complete.obs", method = "pearson")
+r_sp  <- cor(scatter_df$log2FC_lx, scatter_df$logFC_soma,
+             use = "complete.obs", method = "spearman")
+
+ggplot(scatter_df, aes(x = log2FC_lx, y = logFC_soma,
+                        color = sig_category, label = label_pt)) +
+  geom_hline(yintercept = 0, color = "gray70") +
+  geom_vline(xintercept = 0, color = "gray70") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(size = 3, alpha = 0.85) +
+  geom_text_repel(size = 2.8, max.overlaps = 25, box.padding = 0.3,
+                  na.rm = TRUE, show.legend = FALSE) +
+  scale_color_manual(values = c(
+    "Both p < 0.05"  = "#8e44ad",
+    "Luminex only"   = "#e67e22",
+    "SomaScan only"  = "#27ae60",
+    "Neither"        = "gray60"
+  )) +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.3,
+           label = sprintf("Pearson r = %.2f\nSpearman ρ = %.2f", r_val, r_sp),
+           size = 3.5, color = "gray20") +
+  labs(
+    title    = "Platform concordance: Luminex vs. SomaScan A-V log2FC",
+    subtitle = sprintf("%d of 65 cytokines matched in SomaScan. Dashed = identity line.",
+                       sum(scatter_df$in_soma)),
+    x        = "log2FC Luminex (Arterial / Venous, Wilcoxon)",
+    y        = "log2FC SomaScan (Arterial / Venous, limma)",
+    color    = NULL
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+### Direction concordance summary
+
+```{r}
+#| label: concordance-table
+
+cat("Concordance table (cytokines matched in both platforms):\n")
+platform_df |>
+  dplyr::filter(in_soma) |>
+  count(dir_lx, dir_soma) |>
+  mutate(concordant = dir_lx == dir_soma) |>
+  arrange(desc(concordant)) |>
+  print()
+
+cat("\nCytokines with discordant direction:\n")
+platform_df |>
+  dplyr::filter(in_soma, !concordant) |>
+  select(luminex_name, gene_symbol, log2FC_lx, logFC_soma,
+         p_value_lx, P.Value_soma) |>
+  mutate(across(where(is.numeric), ~ signif(., 3))) |>
+  print()
+```
+
+### Per-patient concordance: arterial vs. arterial, venous vs. venous
+
+For each overlapping protein, compare the per-patient Luminex MFI to the SomaScan log2-RFU **within the same draw type**. Each scatter panel has 12 points (one per patient) per draw; Spearman r quantifies how well the two platforms rank patients relative to each other.
+
+```{r}
+#| label: per-patient-crosswalk
+#| message: false
+
+# Identify best SomaScan aptamer per gene (highest mean RFU among pass_analytes)
+apt_mean_rfu <- soma_samples |>
+  select(all_of(pass_analytes)) |>
+  summarise(across(everything(), ~ mean(., na.rm = TRUE))) |>
+  pivot_longer(everything(), names_to = "AptName", values_to = "mean_rfu")
+
+soma_gene_best <- analyte_info |>
+  select(AptName, Target, EntrezGeneSymbol) |>
+  dplyr::filter(AptName %in% pass_analytes,
+                EntrezGeneSymbol %in% luminex_gene_map$gene_symbol) |>
+  left_join(apt_mean_rfu, by = "AptName") |>
+  group_by(EntrezGeneSymbol) |>
+  slice_max(mean_rfu, n = 1, with_ties = FALSE) |>
+  ungroup()
+
+# Final per-protein crosswalk: one row per matched analyte pair
+per_pt_crosswalk <- luminex_gene_map |>
+  dplyr::filter(luminex_name %in% lx_cols) |>
+  left_join(soma_gene_best |> select(EntrezGeneSymbol, AptName, Target),
+            by = c("gene_symbol" = "EntrezGeneSymbol")) |>
+  dplyr::filter(!is.na(AptName))
+
+cat("Matched analyte pairs for per-patient concordance:", nrow(per_pt_crosswalk), "\n")
+```
+
+```{r}
+#| label: per-patient-build
+
+# Luminex: MFI per patient × draw (already averaged duplicates in lx_avg)
+lumi_long <- lx_avg |>
+  select(patient, draw, all_of(per_pt_crosswalk$luminex_name)) |>
+  pivot_longer(all_of(per_pt_crosswalk$luminex_name),
+               names_to = "luminex_name", values_to = "mfi")
+
+# SomaScan: log2-RFU per patient × draw
+soma_long <- soma_samples |>
+  select(patient, draw, all_of(per_pt_crosswalk$AptName)) |>
+  mutate(across(all_of(per_pt_crosswalk$AptName), log2)) |>
+  pivot_longer(all_of(per_pt_crosswalk$AptName),
+               names_to = "AptName", values_to = "log2_rfu")
+
+per_pt_df <- per_pt_crosswalk |>
+  select(luminex_name, AptName, Target) |>
+  left_join(lumi_long, by = "luminex_name") |>
+  left_join(soma_long, by = c("AptName", "patient", "draw")) |>
+  mutate(draw = factor(draw, levels = c("Venous", "Arterial")))
+```
+
+```{r}
+#| label: per-patient-cor
+
+per_pt_cor <- per_pt_df |>
+  group_by(Target, luminex_name, draw) |>
+  summarise(
+    r_spearman = cor(mfi, log2_rfu, method = "spearman", use = "complete.obs"),
+    n          = sum(!is.na(mfi) & !is.na(log2_rfu)),
+    .groups    = "drop"
+  )
+
+cat("Per-patient Spearman r (Luminex MFI vs. SomaScan log2-RFU):\n")
+per_pt_cor |>
+  pivot_wider(
+    id_cols     = c(Target, luminex_name),
+    names_from  = draw,
+    values_from = r_spearman,
+    names_prefix = "r_"
+  ) |>
+  mutate(
+    mean_r = rowMeans(across(starts_with("r_")), na.rm = TRUE),
+    across(c(starts_with("r_"), mean_r), ~ round(., 3))
+  ) |>
+  arrange(desc(mean_r)) |>
+  print(n = 70)
+```
+
+```{r}
+#| label: per-patient-scatter
+#| fig-height: 20
+#| fig-width: 14
+
+per_pt_df |>
+  mutate(panel_label = paste0(Target, "\n(", luminex_name, ")")) |>
+  ggplot(aes(x = mfi, y = log2_rfu, color = draw, shape = draw)) +
+  geom_point(size = 2.5, alpha = 0.85) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  facet_wrap(~ panel_label, scales = "free", ncol = 5) +
+  scale_color_manual(values = col_av) +
+  scale_shape_manual(values = c("Arterial" = 17, "Venous" = 16)) +
+  labs(
+    title    = "Per-patient concordance: Luminex MFI vs. SomaScan log2-RFU",
+    subtitle = "Each point = one patient. Arterial vs. venous shown separately. Lines = per-draw linear fit.",
+    x        = "Luminex MFI",
+    y        = "SomaScan log2-RFU",
+    color    = NULL, shape = NULL
+  ) +
+  theme_bw(base_size = 9) +
+  theme(
+    legend.position = "bottom",
+    strip.text      = element_text(size = 7),
+    axis.text       = element_text(size = 7)
+  )
+```
+
+```{r}
+#| label: per-patient-cor-bar
+#| fig-height: 8
+#| fig-width: 10
+
+per_pt_cor |>
+  mutate(Target = fct_reorder(Target, r_spearman, .fun = mean, .na_rm = TRUE)) |>
+  ggplot(aes(x = Target, y = r_spearman, fill = draw)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6, alpha = 0.85) +
+  geom_hline(yintercept = c(0, 0.7), linetype = c("solid", "dashed"),
+             color = c("gray30", "gray60")) +
+  scale_fill_manual(values = col_av) +
+  scale_y_continuous(limits = c(-1, 1), breaks = seq(-1, 1, 0.25)) +
+  coord_flip() +
+  labs(
+    title    = "Per-patient Spearman r: Luminex MFI vs. SomaScan log2-RFU",
+    subtitle = "Dashed line = r = 0.70. Sorted by mean r across draws.",
+    x        = NULL,
+    y        = "Spearman r (N = 12 patients per draw)",
+    fill     = NULL
+  ) +
+  theme_bw(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+------------------------------------------------------------------------
+
+## 8. 65-Cytokine Gene Set Enrichment in SomaScan Ranking
+
+Treat the 65 Luminex panel proteins as a custom gene set and test whether they are collectively enriched toward the arterial or venous pole of the SomaScan A-V t-statistic ranking. This tests whether the **cytokine/chemokine compartment as a whole** shows a directional A-V bias in the proteome-wide ranking.
+
+```{r}
+#| label: custom-gsea
+
+# Build Entrez IDs for the 65-cytokine gene set from SomaScan annotations
+# (avoids needing org.Hs.eg.db)
+panel_entrez <- av_results |>
+  dplyr::filter(EntrezGeneSymbol %in% luminex_gene_map$gene_symbol,
+                !is.na(EntrezGeneID), EntrezGeneID != "") |>
+  pull(EntrezGeneID) |>
+  as.character() |>
+  unique()
+
+cat("Entrez IDs recovered for the 65-cytokine panel:", length(panel_entrez), "\n")
+
+# Custom gene set list
+custom_sets <- list(
+  `Luminex_65plex_Cytokine_Panel` = panel_entrez
+)
+
+set.seed(42)
+gsea_panel <- fgsea(
+  pathways    = custom_sets,
+  stats       = ranked_vec,
+  minSize     = 5,
+  maxSize     = 500,
+  nPermSimple = 100000
+) |>
+  as_tibble()
+
+cat("\nGSEA result for the 65-cytokine gene set:\n")
+gsea_panel |>
+  select(pathway, NES, pval, padj, size, leadingEdge) |>
+  mutate(across(c(NES, pval, padj), ~ signif(., 3))) |>
+  print()
+
+cat("\nLeading edge proteins:\n")
+le_symbols <- av_results |>
+  dplyr::filter(EntrezGeneID %in% unlist(gsea_panel$leadingEdge)) |>
+  pull(EntrezGeneSymbol) |>
+  unique()
+cat(paste(le_symbols, collapse = ", "), "\n")
+```
+
+### Enrichment plot
+
+```{r}
+#| label: gsea-panel-plot
+#| fig-height: 5
+
+plotEnrichment(custom_sets[["Luminex_65plex_Cytokine_Panel"]], ranked_vec) +
+  labs(
+    title    = "GSEA enrichment: Luminex 65-plex cytokine panel",
+    subtitle = sprintf("NES = %.2f, p = %.3f — positive NES = collectively enriched in arterial",
+                       gsea_panel$NES, gsea_panel$pval),
+    x        = "Rank in SomaScan A-V t-statistic (left = more arterial)",
+    y        = "Enrichment score"
+  ) +
+  theme_bw(base_size = 12)
+```
+
+### Where do the 65 cytokines sit in the SomaScan ranking?
+
+```{r}
+#| label: panel-rank-plot
+#| fig-height: 6
+
+panel_ranks <- av_results |>
+  mutate(rank = row_number()) |>
+  dplyr::filter(EntrezGeneSymbol %in% luminex_gene_map$gene_symbol) |>
+  left_join(luminex_gene_map, by = c("EntrezGeneSymbol" = "gene_symbol")) |>
+  left_join(lx_results |> select(luminex_name, log2FC_lx, p_value_lx),
+            by = "luminex_name") |>
+  mutate(
+    sig_lx   = p_value_lx < 0.05,
+    sig_soma = P.Value    < 0.05,
+    label    = if_else(sig_lx | sig_soma, EntrezGeneSymbol, NA_character_)
+  ) |>
+  arrange(rank)
+
+ggplot(panel_ranks, aes(x = rank, y = logFC,
+                         color = sig_lx, shape = sig_soma,
+                         label = label)) +
+  geom_hline(yintercept = 0, color = "gray60") +
+  geom_point(size = 3, alpha = 0.85) +
+  geom_text_repel(size = 2.8, max.overlaps = 20, box.padding = 0.3,
+                  na.rm = TRUE, show.legend = FALSE) +
+  scale_color_manual(
+    values = c("TRUE" = "#e67e22", "FALSE" = "gray60"),
+    labels = c("TRUE" = "Luminex p < 0.05", "FALSE" = "Luminex p ≥ 0.05")
+  ) +
+  scale_shape_manual(
+    values = c("TRUE" = 17, "FALSE" = 16),
+    labels = c("TRUE" = "SomaScan p < 0.05", "FALSE" = "SomaScan p ≥ 0.05")
+  ) +
+  scale_x_continuous(
+    sec.axis = sec_axis(~ . / nrow(av_results) * 100, name = "Percentile")
+  ) +
+  labs(
+    title    = "Position of 65 Luminex cytokines in the SomaScan A-V ranking",
+    subtitle = "Positive logFC = higher in arterial. Rank 1 = most arterial.",
+    x        = "Rank in SomaScan proteome (1 = most arterial, 7481 = most venous)",
+    y        = "SomaScan log2FC (Arterial / Venous)",
+    color    = NULL, shape = NULL
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+------------------------------------------------------------------------
+
+## Interpretation Notes
+
+**Sample flags:** Four samples failed SomaScan RowCheck QC (`000_0193-2`, `000_0193-4`, `000_0245-4`, `000_0268-4`). These are included in the paired analysis because ANML normalization has already corrected for sample-level signal variation; excluding them would eliminate patient 0193 entirely and reduce paired power. Results for those specific patients should be interpreted with caution.
+
+**Power:** N = 12 paired samples against 7,481 proteins. The paired design captures the within-patient A-V contrast efficiently, but FDR correction across this many proteins is very conservative at this sample size. Nominal p-value threshold (p \< 0.05) is the interpretively relevant cutoff; treat any FDR-significant finding as a robust signal and nominal hits as candidate proteins.
+
+**GSEA interpretation:** GSEA on the limma t-statistic ranking is more powerful than individual protein testing because it aggregates signal across gene sets. Pathways enriched in arterial blood would suggest systemic arterial supply of those mediators; pathways enriched in venous return suggest peripheral tissue release.
+
+**Cross-platform consistency:** IP-10/CXCL10 direction (venous \> arterial) is the strongest a priori hypothesis from the Luminex data. Consistent direction in SomaScan (despite different aptamer-based measurement) would strengthen that interpretation substantially.

@@ -1,0 +1,6 @@
+platform,gene_symbol,category,ecs_role,logFC,p_value,direction
+Luminex,CXCL10,ECS-modulated cytokine,Suppressed by CB2 (IFN-γ–driven); top Luminex hit,-0.23312157433880296,0.01078744925467036,Venous > Arterial
+Luminex,TNF,ECS-modulated cytokine,Suppressed by CB1/CB2 activation,-0.11129561438619394,0.020609595400318828,Venous > Arterial
+Luminex,IL1B,ECS-modulated cytokine,Suppressed by CB2; NLRP3 inhibited by CBD,-0.21689339776061095,0.025369859822053704,Venous > Arterial
+SomaScan,LEP,Metabolic,Leptin; CB1 upregulation in obesity,-0.4034765029059511,0.02998326581557907,Venous > Arterial
+SomaScan,CCL2,ECS-modulated cytokine,MCP-1; CB2 suppresses monocyte recruitment,-0.1684976848438769,0.0356888015405746,Venous > Arterial

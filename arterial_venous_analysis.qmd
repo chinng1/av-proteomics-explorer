@@ -1,0 +1,1195 @@
+---
+title: "Perioperative Plasma Inflammatory Markers: Arterial vs. Venous"
+author: "Gregory A. Chinn"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    fig-width: 10
+    fig-height: 6
+editor: visual
+---
+
+## Study Overview
+
+**PI:** Arun Prakash, UCSF Anesthesia & Perioperative Care\
+**Assay run:** December 2022 (65-plex cytokines); February 2022 (SomaScan)\
+**Central question:** Do plasma inflammatory marker levels differ between simultaneously collected arterial and venous blood during the perioperative period?
+
+### Physiologic rationale
+
+The arterial sample (radial/femoral arterial line) is post-pulmonary — blood that has traversed the lung and entered the systemic circulation. The venous sample (central/peripheral IV) is pre-pulmonary — blood returning from the peripheral tissue bed. This paired design lets you measure the **arteriovenous (A-V) gradient** across both the lung and the systemic tissue beds:
+
+- **Arterial \> venous**: the peripheral surgical/tissue bed is *consuming* the mediator
+- **Venous \> arterial**: the peripheral tissue bed is *releasing* the mediator into venous return
+
+### Cohort
+
+12 patients undergoing elective surgery under general anesthesia. One simultaneous arterial + venous draw per patient at a single post-induction / intraoperative time point. No pre-operative baseline was included in this submission.
+
+| Patient ID | Surgery | Age | Sex | Obese | Hypothermic | Hyperglycemic |
+|-----------|-----------|-----------|-----------|-----------|-----------|-----------|
+| 0179 | Spine | 58 | M | N | Y | N |
+| 0193 | Laparoscopic cholecystectomy | 55 | F | Y | N | N |
+| 0209 | Spine | 72 | F | N | Y | NA |
+| 0215 | Spine | 42 | M | N | Y | N |
+| 0223 | Craniectomy | 28 | M | N | Y | N |
+| 0245 | Laparoscopic adrenalectomy | 55 | F | Y | N\* | Y |
+| 0250 | Laparoscopic nephrectomy | 50 | F | Y | Y | Y |
+| 0254 | Carotid endarterectomy | 66 | M | N | N | NA |
+| 0268 | Thyroidectomy | 29 | F | N | N | N |
+| 0275 | Transsphenoidal pituitary resection | 66 | F | N | Y | N |
+| 0284 | Spine | 52 | F | N | Y | N |
+| 0291 | Spine | 54 | F | Y | Y | N |
+
+\*N\* = temperature data unclear for 0245
+
+### Sample ID convention
+
+```         
+000_XXXX-2  =  patient XXXX, Venous draw
+000_XXXX-4  =  patient XXXX, Arterial draw
+```
+
+### Data files
+
+| File | Contents |
+|---------------------------|---------------------------------------------|
+| `AP_65plex_byJMR.csv` | 65-plex ProcartaPlex (Luminex), run by J. Mustra Rakic, 12/16/2022 |
+| `AP_Cytokines_12_2022.docx` | Plate layout map for the Luminex run |
+| `SS-229807_v4.1_EDTA_Plasma...anmlQC.qcCheck.adat` | SomaScan v4.1 after QC normalization (\~7,000 proteins, RFU) |
+| `SS-229807_v4.1_EDTA_Plasma...anmlSMP.adat` | SomaScan v4.1 after additional sample-level ANML normalization |
+| `SS-229807_v4.1_EDTA_Plasma - Art vs Venous...xlsx` | Covariate table (surgery type, obesity, hypothermia, hyperglycemia, etc.) |
+
+------------------------------------------------------------------------
+
+## Setup
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(ggrepel)
+library(broom)
+library(pheatmap)
+library(RColorBrewer)
+
+# Set this to the project directory.
+# rstudioapi works interactively; fall back to hard-coded path otherwise.
+data_dir <- tryCatch(
+  dirname(rstudioapi::getActiveDocumentContext()$path),
+  error = function(e) "/Users/gregchinn/Desktop/coding projects/Re_ Metabolomics"
+)
+```
+
+------------------------------------------------------------------------
+
+## Part 1: Data Loading and Preparation
+
+### Plate map and sample metadata
+
+```{r}
+#| label: plate-map
+
+# Unknown ID → (patient_id, draw_type)
+# NOTE: Unknown14 / patient 0245 arterial well was labeled "245-2" in the plate doc;
+# likely a transcription error for "245-4". Verify against original tube labels.
+plate_map <- tribble(
+  ~unknown_id, ~patient,  ~draw,
+  "Unknown1",  "0179",    "Venous",
+  "Unknown2",  "0193",    "Venous",
+  "Unknown3",  "0209",    "Venous",
+  "Unknown4",  "0215",    "Venous",
+  "Unknown5",  "0179",    "Arterial",
+  "Unknown6",  "0193",    "Arterial",
+  "Unknown7",  "0209",    "Arterial",
+  "Unknown8",  "0215",    "Arterial",
+  "Unknown9",  "0223",    "Venous",
+  "Unknown10", "0245",    "Venous",
+  "Unknown11", "0250",    "Venous",
+  "Unknown12", "0254",    "Venous",
+  "Unknown13", "0223",    "Arterial",
+  "Unknown14", "0245",    "Arterial",
+  "Unknown15", "0250",    "Arterial",
+  "Unknown16", "0254",    "Arterial",
+  "Unknown17", "0268",    "Venous",
+  "Unknown18", "0275",    "Venous",
+  "Unknown19", "0284",    "Venous",
+  "Unknown20", "0291",    "Venous",
+  "Unknown21", "0268",    "Arterial",
+  "Unknown22", "0275",    "Arterial",
+  "Unknown23", "0284",    "Arterial",
+  "Unknown24", "0291",    "Arterial"
+)
+
+surgery_map <- tribble(
+  ~patient, ~surgery_type,              ~surgery_group,
+  "0179",   "Spine",                    "Spine",
+  "0193",   "Lap. cholecystectomy",     "Laparoscopic",
+  "0209",   "Spine",                    "Spine",
+  "0215",   "Spine",                    "Spine",
+  "0223",   "Craniectomy",              "Head/Neck",
+  "0245",   "Lap. adrenalectomy",       "Laparoscopic",
+  "0250",   "Lap. nephrectomy",         "Laparoscopic",
+  "0254",   "Carotid endarterectomy",   "Head/Neck",
+  "0268",   "Thyroidectomy",            "Head/Neck",
+  "0275",   "Transsphenoidal",          "Head/Neck",
+  "0284",   "Spine",                    "Spine",
+  "0291",   "Spine",                    "Spine"
+)
+```
+
+### Load covariates from Excel
+
+```{r}
+#| label: load-covariates
+
+covariate_raw <- read_xlsx(
+  file.path(data_dir,
+    "SS-229807_v4.1_EDTA_Plasma - Art vs Venous and surgery type and other covariates after AP2 PK copy.xlsx")
+)
+
+# Rename columns to clean names
+covariate_raw <- covariate_raw |>
+  rename(
+    sample_id      = SampleId,
+    sample_type    = SampleType,
+    draw           = `Arterial vs. Venous`,
+    surgery_type   = `Type of surgery`,
+    spine          = `Spine Surgery (Y/N)`,
+    laparoscopic   = `Laparoscopic Surgery (Y/N)`,
+    neck           = `Neck Surgery (Y/N)`,
+    head           = `Head Surgery (Y/N)`,
+    art_iv_same    = `Art&IV on same side (Y/N)`,
+    white_race     = `White Race (Y/N)`,
+    male           = `Male (Y/N)`,
+    obese          = `Obese (BMI>30)`,
+    hypothermia    = `Hypothermia (Temp <36C)`,
+    hyperglycemia  = `Hyperglycemia (BG>150)`
+  ) |>
+  select(sample_id, draw, surgery_type, art_iv_same, white_race,
+         male, obese, hypothermia, hyperglycemia)
+
+# Parse patient ID from SampleId (format: 000_XXXX-2 or 000_XXXX-4)
+covariate_raw <- covariate_raw |>
+  mutate(patient = str_extract(sample_id, "\\d{4}"))
+
+# Standardize Y/N values: treat "y","Y" → TRUE; "N","N*" → FALSE; anything else → NA
+clean_yn <- function(x) {
+  x <- str_trim(str_to_upper(x))
+  case_when(
+    x == "Y"  ~ TRUE,
+    x == "N"  ~ FALSE,
+    TRUE       ~ NA   # covers NA, "N*", "UNKNOWN", "UNKNOWN (LIKELY Y)", "NA"
+  )
+}
+
+covariate_raw <- covariate_raw |>
+  mutate(across(c(art_iv_same, white_race, male, obese, hypothermia, hyperglycemia),
+                clean_yn))
+
+# Deduplicate to patient level (covariates are the same for both draws)
+covariate_df <- covariate_raw |>
+  group_by(patient) |>
+  summarise(
+    surgery_type  = first(surgery_type),
+    art_iv_same   = first(art_iv_same),
+    white_race    = first(white_race),
+    male          = first(male),
+    obese         = first(obese),
+    hypothermia   = first(hypothermia),
+    hyperglycemia = first(hyperglycemia),
+    .groups = "drop"
+  ) |>
+  left_join(surgery_map |> select(patient, surgery_group), by = "patient")
+
+cat("Patient-level covariate table:\n")
+print(covariate_df, n = 20)
+
+cat("\nCovariate N per group:\n")
+covariate_df |>
+  summarise(
+    n_obese        = sum(obese, na.rm = TRUE),
+    n_hypothermia  = sum(hypothermia, na.rm = TRUE),
+    n_hyperglycemia = sum(hyperglycemia, na.rm = TRUE),
+    n_male         = sum(male, na.rm = TRUE),
+    n_white        = sum(white_race, na.rm = TRUE),
+    n_art_iv_same  = sum(art_iv_same, na.rm = TRUE)
+  ) |> print()
+```
+
+### Load and tidy Luminex 65-plex cytokine data
+
+```{r}
+#| label: load-cytokines
+#| message: false
+
+# The CSV has 54 rows of instrument header; row 55 is the data header
+cytokine_raw <- read_csv(
+  file.path(data_dir, "AP_65plex_byJMR.csv"),
+  skip = 54,
+  show_col_types = FALSE
+)
+
+# Keep only Unknown (patient) rows
+cytokine_raw <- cytokine_raw |>
+  filter(str_starts(Sample, "Unknown"))
+
+# Identify cytokine columns
+cytokine_cols <- cytokine_raw |>
+  select(-Location, -Sample, -`Total Events`) |>
+  names()
+
+cat("Cytokines measured:", length(cytokine_cols), "\n")
+cat("Rows (expect 48 = 24 unknowns × 2 duplicate wells):", nrow(cytokine_raw), "\n")
+```
+
+```{r}
+#| label: tidy-cytokines
+
+# Coerce cytokine columns to numeric (some cells have text artifacts)
+cytokine_tidy <- cytokine_raw |>
+  mutate(across(all_of(cytokine_cols), ~ suppressWarnings(as.numeric(.)))) |>
+  left_join(plate_map, by = c("Sample" = "unknown_id")) |>
+  left_join(surgery_map, by = "patient") |>
+  left_join(covariate_df, by = c("patient", "surgery_type", "surgery_group"))
+
+# Average the two duplicate wells per patient × draw
+cytokine_avg <- cytokine_tidy |>
+  group_by(patient, draw, surgery_type, surgery_group,
+           art_iv_same, white_race, male, obese, hypothermia, hyperglycemia) |>
+  summarise(across(all_of(cytokine_cols), ~ mean(., na.rm = TRUE)), .groups = "drop")
+
+cat("Averaged samples:", nrow(cytokine_avg),
+    "(expect 24 = 12 patients × 2 draws)\n")
+```
+
+------------------------------------------------------------------------
+
+## Part 2: Arterial vs. Venous — Primary Analysis
+
+**Question:** Is there a systematic difference in inflammatory marker concentrations between simultaneously collected arterial and venous blood?
+
+**Method:** Paired Wilcoxon signed-rank test for each cytokine (arterial vs. venous, blocked on patient). Benjamin-Hochberg FDR correction across all 65 analytes.
+
+```{r}
+#| label: av-wilcoxon
+
+# Separate arterial and venous, sorted identically by patient
+art <- cytokine_avg |> filter(draw == "Arterial") |> arrange(patient)
+ven <- cytokine_avg |> filter(draw == "Venous")   |> arrange(patient)
+
+stopifnot(all(art$patient == ven$patient))
+
+av_results <- map_dfr(cytokine_cols, function(cyt) {
+  a <- art[[cyt]]
+  v <- ven[[cyt]]
+
+  test <- tryCatch(
+    wilcox.test(a, v, paired = TRUE, exact = FALSE),
+    error = function(e) list(statistic = NA, p.value = NA)
+  )
+
+  tibble(
+    cytokine        = cyt,
+    mean_arterial   = mean(a, na.rm = TRUE),
+    mean_venous     = mean(v, na.rm = TRUE),
+    median_arterial = median(a, na.rm = TRUE),
+    median_venous   = median(v, na.rm = TRUE),
+    log2FC          = log2((mean(a, na.rm = TRUE) + 0.1) /
+                            (mean(v, na.rm = TRUE) + 0.1)),
+    p_value         = test$p.value
+  )
+}) |>
+  mutate(
+    p_adj_BH           = p.adjust(p_value, method = "BH"),
+    direction          = if_else(log2FC > 0, "Arterial > Venous", "Venous > Arterial"),
+    significant_nominal = p_value < 0.05,
+    significant_FDR    = p_adj_BH < 0.05
+  ) |>
+  arrange(p_value)
+
+cat("Nominally significant (p < 0.05):", sum(av_results$significant_nominal), "of", nrow(av_results), "\n")
+cat("FDR-significant (BH-adj p < 0.05):", sum(av_results$significant_FDR), "\n\n")
+
+av_results |>
+  select(cytokine, mean_arterial, mean_venous, log2FC, p_value, p_adj_BH, direction) |>
+  mutate(across(c(mean_arterial, mean_venous), ~ round(., 1)),
+         across(c(log2FC, p_value, p_adj_BH), ~ signif(., 3))) |>
+  print(n = 30)
+```
+
+### Volcano plot
+
+```{r}
+#| label: volcano-plot
+#| fig-height: 7
+
+top_label <- av_results |> slice_min(p_value, n = 15)
+
+ggplot(av_results, aes(x = log2FC, y = -log10(p_value),
+                        color = direction, label = cytokine)) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "gray50") +
+  geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_text_repel(data = top_label, size = 3, max.overlaps = 20,
+                  box.padding = 0.4, show.legend = FALSE) +
+  scale_color_manual(values = c("Arterial > Venous" = "#c0392b",
+                                 "Venous > Arterial" = "#2980b9")) +
+  labs(
+    title    = "Arterial vs. Venous: 65-Plex Cytokines (N = 12 paired patients)",
+    subtitle = "Dashed line = nominal p < 0.05. No cytokine survives BH-FDR correction at N = 12.",
+    x        = "log2 fold-change (Arterial / Venous)",
+    y        = "-log10(p), paired Wilcoxon",
+    color    = NULL
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+### Paired dot plots for top hits
+
+```{r}
+#| label: paired-dots
+#| fig-height: 8
+
+top_cyts <- av_results |> slice_min(p_value, n = 12) |> pull(cytokine)
+
+cytokine_avg |>
+  select(patient, draw, surgery_group, all_of(top_cyts)) |>
+  pivot_longer(all_of(top_cyts), names_to = "cytokine", values_to = "conc") |>
+  mutate(
+    draw     = factor(draw, levels = c("Venous", "Arterial")),
+    cytokine = factor(cytokine, levels = top_cyts)
+  ) |>
+  ggplot(aes(x = draw, y = conc, group = patient, color = surgery_group)) +
+  geom_line(alpha = 0.5) +
+  geom_point(size = 2) +
+  facet_wrap(~ cytokine, scales = "free_y", ncol = 4) +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    title  = "Top 12 cytokines: paired arterial vs. venous per patient",
+    x      = NULL,
+    y      = "Concentration (MFI)",
+    color  = "Surgery type"
+  ) +
+  theme_bw(base_size = 10) +
+  theme(legend.position = "bottom")
+```
+
+### Direction summary
+
+```{r}
+#| label: direction-summary
+
+cat("Nominal p < 0.05:\n")
+av_results |>
+  filter(significant_nominal) |>
+  select(cytokine, log2FC, p_value, p_adj_BH, direction) |>
+  mutate(across(where(is.numeric), ~ signif(., 3))) |>
+  print()
+
+cat("\nOverall direction (all 65 analytes):\n")
+av_results |> count(direction) |> print()
+
+cat("\nIP-10/CXCL10 detail:\n")
+av_results |> filter(str_detect(cytokine, "IP-10")) |> print()
+```
+
+------------------------------------------------------------------------
+
+## Part 3: Covariate Analysis — Cytokine Levels by Patient Characteristics
+
+**Question:** Do baseline patient characteristics (obesity, hypothermia, hyperglycemia, sex, surgery type) associate with cytokine concentrations at the intraoperative time point?
+
+**Method:** Venous samples used as the representative per-patient measurement (less affected by arterial catheter placement). Wilcoxon rank-sum test for binary covariates; Kruskal-Wallis for surgery type (3 groups). No FDR correction within this section — treat all results as exploratory given N = 12.
+
+### Helper: run all covariate tests
+
+```{r}
+#| label: covariate-tests
+
+# Patient-level dataframe using venous concentrations
+ven_pt <- cytokine_avg |>
+  filter(draw == "Venous") |>
+  select(patient, surgery_group, art_iv_same, white_race,
+         male, obese, hypothermia, hyperglycemia,
+         all_of(cytokine_cols))
+
+# Binary covariate tests (Wilcoxon rank-sum)
+binary_covariates <- c("obese", "hypothermia", "hyperglycemia",
+                        "male", "white_race", "art_iv_same")
+
+run_binary_tests <- function(df, covars, analytes) {
+  map_dfr(covars, function(cov) {
+    map_dfr(analytes, function(cyt) {
+      group_vals <- df[[cov]]
+      conc_vals  <- df[[cyt]]
+
+      # Drop rows where covariate is NA
+      keep <- !is.na(group_vals)
+      g    <- group_vals[keep]
+      y    <- conc_vals[keep]
+
+      n_pos <- sum(g == TRUE,  na.rm = TRUE)
+      n_neg <- sum(g == FALSE, na.rm = TRUE)
+
+      if (n_pos < 2 || n_neg < 2) {
+        return(tibble(covariate = cov, cytokine = cyt, p_value = NA,
+                      median_pos = NA, median_neg = NA,
+                      log2FC_pos_neg = NA, n_pos = n_pos, n_neg = n_neg))
+      }
+
+      test <- tryCatch(
+        wilcox.test(y[g], y[!g], exact = FALSE),
+        error = function(e) list(p.value = NA)
+      )
+
+      tibble(
+        covariate      = cov,
+        cytokine       = cyt,
+        p_value        = test$p.value,
+        median_pos     = median(y[g],  na.rm = TRUE),
+        median_neg     = median(y[!g], na.rm = TRUE),
+        log2FC_pos_neg = log2((median(y[g],  na.rm = TRUE) + 0.1) /
+                               (median(y[!g], na.rm = TRUE) + 0.1)),
+        n_pos          = n_pos,
+        n_neg          = n_neg
+      )
+    })
+  })
+}
+
+binary_results <- run_binary_tests(ven_pt, binary_covariates, cytokine_cols)
+
+# Surgery type: Kruskal-Wallis (3 groups)
+surgery_results <- map_dfr(cytokine_cols, function(cyt) {
+  kw <- kruskal.test(ven_pt[[cyt]] ~ ven_pt$surgery_group)
+  tibble(
+    covariate = "surgery_group",
+    cytokine  = cyt,
+    p_value   = kw$p.value,
+    n_pos     = NA_real_,
+    n_neg     = NA_real_,
+    log2FC_pos_neg = NA_real_
+  )
+})
+
+all_covariate_results <- bind_rows(binary_results, surgery_results) |>
+  mutate(p_adj_BH = p.adjust(p_value, method = "BH"), .by = covariate) |>
+  arrange(covariate, p_value)
+
+cat("Covariate tests complete.\n")
+cat("Nominally significant hits (p < 0.05) per covariate:\n")
+all_covariate_results |>
+  filter(p_value < 0.05) |>
+  count(covariate) |>
+  print()
+```
+
+### Top hits per covariate
+
+```{r}
+#| label: top-hits-per-covariate
+#| fig-height: 10
+
+# Display top 10 cytokines per covariate by p-value
+all_covariate_results |>
+  filter(!is.na(p_value)) |>
+  group_by(covariate) |>
+  slice_min(p_value, n = 10) |>
+  select(covariate, cytokine, log2FC_pos_neg, p_value, p_adj_BH, n_pos, n_neg) |>
+  mutate(across(c(log2FC_pos_neg, p_value, p_adj_BH), ~ signif(., 3))) |>
+  ungroup() |>
+  print(n = 80)
+```
+
+### Heatmap of –log10(p) across cytokines × covariates
+
+```{r}
+#| label: covariate-heatmap
+#| fig-height: 12
+#| fig-width: 9
+
+# Only show cytokines with at least one nominal hit across any covariate
+nominally_hit_cyts <- all_covariate_results |>
+  filter(p_value < 0.05) |>
+  pull(cytokine) |>
+  unique()
+
+heatmap_mat <- all_covariate_results |>
+  filter(cytokine %in% nominally_hit_cyts) |>
+  mutate(neg_log10_p = -log10(pmax(p_value, 1e-4))) |>
+  select(covariate, cytokine, neg_log10_p) |>
+  pivot_wider(names_from = covariate, values_from = neg_log10_p) |>
+  column_to_rownames("cytokine") |>
+  as.matrix()
+
+# Cap at -log10(0.01) = 2 for display
+heatmap_mat[is.na(heatmap_mat)] <- 0
+heatmap_mat <- pmin(heatmap_mat, 3)
+
+covariate_labels <- c(
+  obese         = "Obese",
+  hypothermia   = "Hypothermia",
+  hyperglycemia = "Hyperglycemia",
+  male          = "Male sex",
+  white_race    = "White race",
+  art_iv_same   = "Art & IV same side",
+  surgery_group = "Surgery type\n(Kruskal-Wallis)"
+)
+colnames(heatmap_mat) <- covariate_labels[colnames(heatmap_mat)]
+
+pheatmap(
+  heatmap_mat,
+  color            = colorRampPalette(c("white", "#f7dc6f", "#e74c3c"))(50),
+  breaks           = seq(0, 3, length.out = 51),
+  cluster_rows     = TRUE,
+  cluster_cols     = FALSE,
+  fontsize_row     = 8,
+  fontsize_col     = 9,
+  main             = "–log10(p) by cytokine and covariate\n(venous samples; red = p < 0.001; yellow = p < 0.05; cap at 3)",
+  border_color     = NA,
+  angle_col        = 45
+)
+```
+
+### Paired dot plots for top covariate hits
+
+```{r}
+#| label: covariate-dot-plots
+#| fig-height: 14
+
+top3_per_cov <- all_covariate_results |>
+  filter(covariate != "surgery_group", !is.na(p_value)) |>
+  group_by(covariate) |>
+  slice_min(p_value, n = 3) |>
+  ungroup()
+
+if (nrow(top3_per_cov) > 0) {
+  cov_long <- ven_pt |>
+    select(patient, all_of(binary_covariates)) |>
+    pivot_longer(all_of(binary_covariates), names_to = "covariate", values_to = "group_val")
+
+  cyt_long <- ven_pt |>
+    select(patient, all_of(cytokine_cols)) |>
+    pivot_longer(all_of(cytokine_cols), names_to = "cytokine", values_to = "conc")
+
+  plot_data <- top3_per_cov |>
+    select(covariate, cytokine) |>
+    left_join(cyt_long, by = "cytokine") |>
+    left_join(cov_long, by = c("patient", "covariate")) |>
+    filter(!is.na(group_val)) |>
+    mutate(
+      group_label = if_else(group_val, "Yes", "No"),
+      panel_label = paste0(covariate, ": ", cytokine)
+    )
+
+  if (nrow(plot_data) > 0) {
+    print(
+      ggplot(plot_data, aes(x = group_label, y = conc, color = group_label)) +
+        geom_jitter(width = 0.1, size = 2.5, alpha = 0.8) +
+        stat_summary(fun = median, geom = "crossbar", width = 0.4,
+                     color = "black", linewidth = 0.5) +
+        facet_wrap(~ panel_label, scales = "free_y", ncol = 3) +
+        scale_color_manual(values = c("Yes" = "#c0392b", "No" = "#2980b9")) +
+        labs(
+          title = "Top 3 cytokines per binary covariate (venous concentrations)",
+          x = NULL, y = "Concentration (MFI)", color = NULL
+        ) +
+        theme_bw(base_size = 10) +
+        theme(legend.position = "none", strip.text = element_text(size = 7))
+    )
+  } else {
+    cat("No plottable data after NA removal.\n")
+  }
+} else {
+  cat("No binary covariate hits to plot.\n")
+}
+```
+
+### Surgery type: pairwise Wilcoxon for top Kruskal-Wallis hits
+
+```{r}
+#| label: surgery-pairwise
+#| fig-height: 8
+
+top_surgery_cyts <- surgery_results |>
+  slice_min(p_value, n = 9) |>
+  pull(cytokine)
+
+ven_pt |>
+  select(patient, surgery_group, all_of(top_surgery_cyts)) |>
+  pivot_longer(all_of(top_surgery_cyts), names_to = "cytokine", values_to = "conc") |>
+  mutate(cytokine = factor(cytokine, levels = top_surgery_cyts)) |>
+  ggplot(aes(x = surgery_group, y = conc, color = surgery_group)) +
+  geom_jitter(width = 0.15, size = 2.5, alpha = 0.8) +
+  stat_summary(fun = median, geom = "crossbar", width = 0.5,
+               color = "black", linewidth = 0.5) +
+  facet_wrap(~ cytokine, scales = "free_y", ncol = 3) +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    title = "Top 9 cytokines by surgery type (Kruskal-Wallis, venous samples)",
+    x = NULL, y = "Concentration (MFI)", color = "Surgery type"
+  ) +
+  theme_bw(base_size = 10) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+------------------------------------------------------------------------
+
+## Part 4: Arterial–Venous Gradient by Covariate
+
+**Question:** Do patient characteristics modify the *magnitude or direction* of the arteriovenous gradient?
+
+**Method:** Compute the A-V delta (arterial − venous concentration) per patient per cytokine. Test delta against each binary covariate using Wilcoxon rank-sum. A significant result means the gradient is larger (or reversed) in one patient subgroup vs. another.
+
+```{r}
+#| label: av-delta
+
+# Compute A-V delta per patient per cytokine
+art_wide <- cytokine_avg |> filter(draw == "Arterial") |> arrange(patient) |>
+  select(patient, all_of(cytokine_cols))
+ven_wide <- cytokine_avg |> filter(draw == "Venous")   |> arrange(patient) |>
+  select(patient, all_of(cytokine_cols))
+
+delta_mat <- art_wide
+delta_mat[, cytokine_cols] <- art_wide[, cytokine_cols] - ven_wide[, cytokine_cols]
+
+# Attach covariates
+delta_df <- delta_mat |>
+  left_join(covariate_df, by = "patient")
+
+cat("A-V delta computed for", nrow(delta_df), "patients\n")
+```
+
+```{r}
+#| label: delta-covariate-tests
+
+delta_binary_results <- run_binary_tests(delta_df, binary_covariates, cytokine_cols) |>
+  mutate(p_adj_BH = p.adjust(p_value, method = "BH"), .by = covariate)
+
+cat("Nominally significant (p < 0.05) A-V delta differences per covariate:\n")
+delta_binary_results |>
+  filter(p_value < 0.05) |>
+  count(covariate) |>
+  print()
+
+cat("\nTop hits (p < 0.05):\n")
+delta_binary_results |>
+  filter(p_value < 0.05) |>
+  select(covariate, cytokine, log2FC_pos_neg, p_value, n_pos, n_neg) |>
+  mutate(across(c(log2FC_pos_neg, p_value), ~ signif(., 3))) |>
+  arrange(covariate, p_value) |>
+  print(n = 50)
+```
+
+### Heatmap of –log10(p) for A-V delta × covariate
+
+```{r}
+#| label: delta-heatmap
+#| fig-height: 10
+#| fig-width: 9
+
+hit_cyts_delta <- delta_binary_results |>
+  filter(p_value < 0.05) |>
+  pull(cytokine) |>
+  unique()
+
+if (length(hit_cyts_delta) > 0) {
+  delta_heatmap_mat <- delta_binary_results |>
+    filter(cytokine %in% hit_cyts_delta) |>
+    mutate(neg_log10_p = -log10(pmax(p_value, 1e-4))) |>
+    select(covariate, cytokine, neg_log10_p) |>
+    pivot_wider(names_from = covariate, values_from = neg_log10_p) |>
+    column_to_rownames("cytokine") |>
+    as.matrix()
+
+  delta_heatmap_mat[is.na(delta_heatmap_mat)] <- 0
+  delta_heatmap_mat <- pmin(delta_heatmap_mat, 3)
+  colnames(delta_heatmap_mat) <- covariate_labels[colnames(delta_heatmap_mat)]
+
+  pheatmap(
+    delta_heatmap_mat,
+    color        = colorRampPalette(c("white", "#a8d8ea", "#2c3e50"))(50),
+    breaks       = seq(0, 3, length.out = 51),
+    cluster_rows = TRUE,
+    cluster_cols = FALSE,
+    fontsize_row = 8,
+    fontsize_col = 9,
+    main         = "–log10(p) for A-V delta by covariate\n(does gradient magnitude differ by subgroup?)",
+    border_color = NA,
+    angle_col    = 45
+  )
+} else {
+  cat("No nominal hits in A-V delta × covariate analysis.\n")
+}
+```
+
+### Dot plots: A-V delta for top hits
+
+```{r}
+#| label: delta-dot-plots
+#| fig-height: 10
+
+top_delta <- delta_binary_results |>
+  filter(p_value < 0.10) |>
+  group_by(covariate) |>
+  slice_min(p_value, n = 3) |>
+  ungroup()
+
+if (nrow(top_delta) > 0) {
+  delta_cov_long <- delta_df |>
+    select(patient, all_of(binary_covariates)) |>
+    pivot_longer(all_of(binary_covariates), names_to = "covariate", values_to = "group_val")
+
+  delta_long <- delta_df |>
+    select(patient, all_of(cytokine_cols)) |>
+    pivot_longer(all_of(cytokine_cols), names_to = "cytokine", values_to = "delta")
+
+  plot_delta_data <- top_delta |>
+    select(covariate, cytokine) |>
+    left_join(delta_long, by = "cytokine") |>
+    left_join(delta_cov_long, by = c("patient", "covariate")) |>
+    filter(!is.na(group_val)) |>
+    mutate(
+      group_label = if_else(group_val, "Yes", "No"),
+      panel_label = paste0(covariate, ": ", cytokine)
+    )
+
+  if (nrow(plot_delta_data) > 0) {
+    print(
+      ggplot(plot_delta_data, aes(x = group_label, y = delta, color = group_label)) +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+        geom_jitter(width = 0.1, size = 2.5, alpha = 0.8) +
+        stat_summary(fun = median, geom = "crossbar", width = 0.4,
+                     color = "black", linewidth = 0.5) +
+        facet_wrap(~ panel_label, scales = "free_y", ncol = 3) +
+        scale_color_manual(values = c("Yes" = "#c0392b", "No" = "#2980b9")) +
+        labs(
+          title = "A-V delta (arterial − venous) by covariate — top hits at p < 0.10",
+          x = NULL, y = "A-V delta (MFI)", color = NULL
+        ) +
+        theme_bw(base_size = 10) +
+        theme(legend.position = "none", strip.text = element_text(size = 7))
+    )
+  } else {
+    cat("No plottable delta data after NA removal.\n")
+  }
+} else {
+  cat("No hits at p < 0.10 threshold.\n")
+}
+```
+
+------------------------------------------------------------------------
+
+## Part 5: SomaScan v4.1 Proteomics (\~7,000 proteins)
+
+**Note:** All chunks below carry `eval: false`. Set to `eval: true` once `SomaDataIO` is installed (`install.packages("SomaDataIO")`). The paired limma analysis mirrors the structure of the Luminex analysis above.
+
+### Reading .adat files
+
+```{r}
+#| label: somascan-load
+#| eval: false
+
+library(SomaDataIO)
+library(limma)
+
+# Use the anmlSMP file (hybNorm → medNorm → plateScale → calibration → ANML QC → ANML sample)
+adat_file <- file.path(
+  data_dir,
+  "SS-229807_v4.1_EDTA_Plasma.hybNorm.medNormInt.plateScale.calibration.anmlQC.qcCheck.anmlSMP.adat"
+)
+
+soma <- read_adat(adat_file)
+dim(soma)
+```
+
+### Extract samples and build expression matrix
+
+```{r}
+#| label: somascan-prep
+#| eval: false
+
+soma_samples <- soma |>
+  filter(SampleType == "Sample") |>
+  mutate(
+    patient = str_extract(SampleId, "\\d{4}"),
+    draw    = if_else(str_detect(SampleId, "-2$"), "Venous", "Arterial")
+  ) |>
+  left_join(covariate_df, by = "patient")
+
+analyte_cols <- getAnalytes(soma)
+
+# log2-transform RFU for limma
+expr_mat <- soma_samples |>
+  select(all_of(analyte_cols)) |>
+  as.matrix() |>
+  log2()
+
+rownames(expr_mat) <- soma_samples$SampleId
+```
+
+### Arterial vs. Venous: paired limma
+
+```{r}
+#| label: somascan-av
+#| eval: false
+
+patient_factor <- factor(soma_samples$patient)
+draw_factor    <- factor(soma_samples$draw, levels = c("Venous", "Arterial"))
+
+design <- model.matrix(~ patient_factor + draw_factor)
+fit    <- lmFit(t(expr_mat), design)
+fit    <- eBayes(fit)
+
+soma_av_results <- topTable(fit, coef = "draw_factorArterial",
+                             number = Inf, sort.by = "P") |>
+  rownames_to_column("aptamer") |>
+  as_tibble()
+
+# Annotate with protein names
+analyte_anno <- getAnalyteInfo(soma) |>
+  select(AptName, Target, EntrezGeneSymbol, UniProt)
+
+soma_av_results <- soma_av_results |>
+  left_join(analyte_anno, by = c("aptamer" = "AptName"))
+
+cat("FDR-significant A-V hits (adj.P.Val < 0.05):", sum(soma_av_results$adj.P.Val < 0.05), "\n")
+
+soma_av_results |>
+  filter(adj.P.Val < 0.05) |>
+  arrange(adj.P.Val) |>
+  select(Target, EntrezGeneSymbol, logFC, AveExpr, P.Value, adj.P.Val) |>
+  print(n = 50)
+```
+
+### SomaScan volcano plot
+
+```{r}
+#| label: somascan-volcano
+#| eval: false
+
+soma_av_results |>
+  mutate(sig = adj.P.Val < 0.05) |>
+  ggplot(aes(x = logFC, y = -log10(P.Value), color = sig)) +
+  geom_point(alpha = 0.4, size = 1) +
+  geom_text_repel(
+    data = soma_av_results |> filter(adj.P.Val < 0.05) |> slice_min(adj.P.Val, n = 20),
+    aes(label = Target), size = 2.5, max.overlaps = 20
+  ) +
+  scale_color_manual(values = c("FALSE" = "gray70", "TRUE" = "#c0392b")) +
+  labs(
+    title = "SomaScan: Arterial vs. Venous (paired limma, ~7,000 proteins)",
+    x = "log2FC (Arterial / Venous)", y = "-log10(p)",
+    color = "FDR < 0.05"
+  ) +
+  theme_bw(base_size = 12)
+```
+
+### SomaScan covariate analysis
+
+```{r}
+#| label: somascan-covariates
+#| eval: false
+
+# Patient-level expression matrix using venous samples
+soma_ven <- soma_samples |>
+  filter(draw == "Venous") |>
+  arrange(patient)
+
+expr_ven <- soma_ven |>
+  select(all_of(analyte_cols)) |>
+  as.matrix() |>
+  log2()
+
+# For each binary covariate, paired Wilcoxon or limma linear model
+# With N = 12 venous samples, use simple linear model with limma for stability
+soma_covariate_results <- map_dfr(binary_covariates, function(cov) {
+  group <- soma_ven[[cov]]
+  keep  <- !is.na(group)
+
+  if (sum(keep) < 6 || length(unique(group[keep])) < 2) return(NULL)
+
+  design_cov <- model.matrix(~ group[keep])
+  fit_cov    <- lmFit(t(expr_ven[keep, ]), design_cov)
+  fit_cov    <- eBayes(fit_cov)
+
+  topTable(fit_cov, coef = 2, number = Inf, sort.by = "P") |>
+    rownames_to_column("aptamer") |>
+    mutate(covariate = cov) |>
+    left_join(analyte_anno, by = c("aptamer" = "AptName")) |>
+    as_tibble()
+})
+
+cat("SomaScan covariate hits (adj.P.Val < 0.05) per covariate:\n")
+soma_covariate_results |>
+  filter(adj.P.Val < 0.05) |>
+  count(covariate) |>
+  print()
+```
+
+------------------------------------------------------------------------
+
+## Part 6: Cross-Platform Concordance (Luminex vs. SomaScan)
+
+**Question:** For proteins measured by both platforms, do the two assays agree within the same sample type (arterial vs. arterial; venous vs. venous)?
+
+**Method:** Match Luminex cytokine names to SomaScan analytes via gene symbol. For genes with multiple SomaScan aptamers, retain the aptamer with the highest mean signal (the dominant isoform/binding site). Compute Spearman r per analyte per draw type across the 12 patients. Scatter plots show Luminex MFI vs. SomaScan log2-RFU per patient; concordance bar chart summarizes agreement.
+
+### Define name crosswalk
+
+```{r}
+#| label: crosswalk-define
+#| eval: false
+
+# Explicit Luminex ProcartaPlex name → EntrezGeneSymbol mapping.
+# Covers the standard 65-plex Human Cytokine/Chemokine panel; adjust names
+# below after inspecting cytokine_cols if the actual column names differ.
+lumi_soma_map <- tribble(
+  ~luminex_name,      ~gene_symbol,
+  "EGF",              "EGF",
+  "Eotaxin",          "CCL11",
+  "FGF-2",            "FGF2",
+  "Flt-3L",           "FLT3LG",
+  "Fractalkine",      "CX3CL1",
+  "G-CSF",            "CSF3",
+  "GM-CSF",           "CSF2",
+  "GRO-alpha",        "CXCL1",
+  "IFN-alpha2",       "IFNA2",
+  "IFN-gamma",        "IFNG",
+  "IL-1alpha",        "IL1A",
+  "IL-1beta",         "IL1B",
+  "IL-1RA",           "IL1RN",
+  "IL-2",             "IL2",
+  "IL-3",             "IL3",
+  "IL-4",             "IL4",
+  "IL-5",             "IL5",
+  "IL-6",             "IL6",
+  "IL-7",             "IL7",
+  "IL-8",             "CXCL8",
+  "IL-9",             "IL9",
+  "IL-10",            "IL10",
+  "IL-12p40",         "IL12B",
+  "IL-12p70",         "IL12A",
+  "IL-13",            "IL13",
+  "IL-15",            "IL15",
+  "IL-17A",           "IL17A",
+  "IL-17E/IL-25",     "IL25",
+  "IL-17F",           "IL17F",
+  "IL-18",            "IL18",
+  "IL-22",            "IL22",
+  "IL-27",            "IL27",
+  "IP-10",            "CXCL10",
+  "MCP-1",            "CCL2",
+  "MCP-3",            "CCL7",
+  "M-CSF",            "CSF1",
+  "MDC",              "CCL22",
+  "MIG",              "CXCL9",
+  "MIP-1alpha",       "CCL3",
+  "MIP-1beta",        "CCL4",
+  "PDGF-AA",          "PDGFA",
+  "PDGF-AB/BB",       "PDGFB",
+  "RANTES",           "CCL5",
+  "sCD40L",           "CD40LG",
+  "sEGFR",            "EGFR",
+  "sGP130",           "IL6ST",
+  "sIL-2Ra",          "IL2RA",
+  "sIL-6R",           "IL6R",
+  "sTNF-RI",          "TNFRSF1A",
+  "sTNF-RII",         "TNFRSF1B",
+  "TARC",             "CCL17",
+  "TGF-alpha",        "TGFA",
+  "TNF-alpha",        "TNF",
+  "TNF-beta",         "LTA",
+  "TRAIL",            "TNFSF10",
+  "TSLP",             "TSLP",
+  "VEGF",             "VEGFA"
+)
+
+# Show actual Luminex columns so you can verify / fix any name mismatches above
+cat("Actual Luminex cytokine_cols:\n")
+print(cytokine_cols)
+
+# Report what the crosswalk covers vs. what is unmatched
+matched_lumi <- lumi_soma_map |> filter(luminex_name %in% cytokine_cols)
+unmatched    <- setdiff(cytokine_cols, matched_lumi$luminex_name)
+
+cat("\nMatched Luminex names:", nrow(matched_lumi), "\n")
+if (length(unmatched) > 0)
+  cat("Unmatched (not in crosswalk):", paste(unmatched, collapse = ", "), "\n")
+```
+
+### Match to SomaScan aptamers
+
+```{r}
+#| label: crosswalk-match
+#| eval: false
+
+# For each gene, keep the aptamer with the highest mean RFU across all samples
+# (most abundant binding site; avoids picking a low-signal duplicate aptamer)
+analyte_mean_rfu <- soma_samples |>
+  select(all_of(analyte_cols)) |>
+  summarise(across(everything(), ~ mean(., na.rm = TRUE))) |>
+  pivot_longer(everything(), names_to = "AptName", values_to = "mean_rfu")
+
+soma_gene_best <- getAnalyteInfo(soma) |>
+  select(AptName, Target, EntrezGeneSymbol, UniProt) |>
+  filter(EntrezGeneSymbol %in% matched_lumi$gene_symbol) |>
+  left_join(analyte_mean_rfu, by = "AptName") |>
+  group_by(EntrezGeneSymbol) |>
+  slice_max(mean_rfu, n = 1, with_ties = FALSE) |>
+  ungroup()
+
+# Final crosswalk: one row per matched analyte pair
+final_crosswalk <- matched_lumi |>
+  left_join(soma_gene_best |> select(EntrezGeneSymbol, AptName, Target),
+            by = c("gene_symbol" = "EntrezGeneSymbol")) |>
+  filter(!is.na(AptName))
+
+cat("Final matched analyte pairs:", nrow(final_crosswalk), "\n\n")
+print(final_crosswalk |> select(luminex_name, gene_symbol, AptName, Target))
+```
+
+### Build paired concordance dataset
+
+```{r}
+#| label: concordance-build
+#| eval: false
+
+# Luminex: MFI (averaged duplicate wells, already in cytokine_avg)
+lumi_long <- cytokine_avg |>
+  select(patient, draw, all_of(final_crosswalk$luminex_name)) |>
+  pivot_longer(all_of(final_crosswalk$luminex_name),
+               names_to = "luminex_name", values_to = "mfi")
+
+# SomaScan: log2-RFU (apply log2 here; soma_samples holds raw RFU)
+soma_long <- soma_samples |>
+  select(patient, draw, all_of(final_crosswalk$AptName)) |>
+  mutate(across(all_of(final_crosswalk$AptName), log2)) |>
+  pivot_longer(all_of(final_crosswalk$AptName),
+               names_to = "AptName", values_to = "log2_rfu")
+
+concordance_df <- final_crosswalk |>
+  select(luminex_name, AptName, Target) |>
+  left_join(lumi_long, by = "luminex_name") |>
+  left_join(soma_long, by = c("AptName", "patient", "draw")) |>
+  mutate(draw = factor(draw, levels = c("Venous", "Arterial")))
+
+cat("Concordance rows:", nrow(concordance_df),
+    "(expect", nrow(final_crosswalk), "analytes × 24 samples =",
+    nrow(final_crosswalk) * 24L, ")\n")
+```
+
+### Spearman correlations
+
+```{r}
+#| label: concordance-cor
+#| eval: false
+
+concordance_cor <- concordance_df |>
+  group_by(Target, luminex_name, draw) |>
+  summarise(
+    r_spearman = cor(mfi, log2_rfu, method = "spearman", use = "complete.obs"),
+    n          = sum(!is.na(mfi) & !is.na(log2_rfu)),
+    .groups    = "drop"
+  )
+
+# Wide format summary table
+concordance_cor_wide <- concordance_cor |>
+  pivot_wider(
+    id_cols     = c(Target, luminex_name),
+    names_from  = draw,
+    values_from = r_spearman,
+    names_prefix = "r_"
+  ) |>
+  mutate(
+    mean_r = rowMeans(across(starts_with("r_")), na.rm = TRUE),
+    across(starts_with("r_") | mean_r, ~ round(., 3))
+  ) |>
+  arrange(desc(mean_r))
+
+cat("Cross-platform Spearman correlations (Luminex MFI vs. SomaScan log2-RFU):\n")
+print(concordance_cor_wide, n = 60)
+```
+
+### Scatter plots: Luminex vs. SomaScan per patient
+
+```{r}
+#| label: concordance-scatter
+#| eval: false
+#| fig-height: 18
+#| fig-width: 14
+
+concordance_df |>
+  mutate(panel_label = paste0(Target, "\n(", luminex_name, ")")) |>
+  ggplot(aes(x = mfi, y = log2_rfu, color = draw, shape = draw)) +
+  geom_point(size = 2.5, alpha = 0.85) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  facet_wrap(~ panel_label, scales = "free", ncol = 5) +
+  scale_color_manual(values = c("Arterial" = "#c0392b", "Venous" = "#2980b9")) +
+  scale_shape_manual(values = c("Arterial" = 17, "Venous" = 16)) +
+  labs(
+    title    = "Cross-platform concordance: Luminex MFI vs. SomaScan log2-RFU",
+    subtitle = "Each point = one patient. Lines = per-draw linear fit. Axes free-scaled per analyte.",
+    x        = "Luminex MFI",
+    y        = "SomaScan log2-RFU",
+    color    = NULL, shape = NULL
+  ) +
+  theme_bw(base_size = 9) +
+  theme(
+    legend.position = "bottom",
+    strip.text      = element_text(size = 7),
+    axis.text       = element_text(size = 7)
+  )
+```
+
+### Concordance summary: Spearman r by analyte and draw
+
+```{r}
+#| label: concordance-bar
+#| eval: false
+#| fig-height: 7
+#| fig-width: 10
+
+concordance_cor |>
+  mutate(
+    Target = fct_reorder(Target, r_spearman, .fun = mean, .na_rm = TRUE)
+  ) |>
+  ggplot(aes(x = Target, y = r_spearman, fill = draw)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6, alpha = 0.85) +
+  geom_hline(yintercept = c(0, 0.7), linetype = c("solid", "dashed"),
+             color = c("gray30", "gray60")) +
+  scale_fill_manual(values = c("Arterial" = "#c0392b", "Venous" = "#2980b9")) +
+  scale_y_continuous(limits = c(-1, 1), breaks = seq(-1, 1, 0.25)) +
+  coord_flip() +
+  labs(
+    title    = "Cross-platform Spearman r: Luminex MFI vs. SomaScan log2-RFU",
+    subtitle = "Dashed line = r = 0.70 (reasonable concordance threshold). Sorted by mean r.",
+    x        = NULL,
+    y        = "Spearman r",
+    fill     = NULL
+  ) +
+  theme_bw(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+------------------------------------------------------------------------
+
+## Interpretation Notes
+
+**A-V gradient (dominant pattern):** A consistent directionality across nearly all analytes suggests the peripheral tissue bed (surgical site + anesthetized tissues) is consuming inflammatory mediators from the arterial circulation during the intraoperative period. Power is insufficient at N = 12 to survive BH correction across 65 analytes.
+
+**IP-10/CXCL10:** Consistently shows venous \> arterial, indicating active *release* from the peripheral surgical bed. This is consistent with known IP-10 biology in perioperative inflammation (IFN-γ–inducible, elevated at sites of tissue injury).
+
+**Covariate analysis caveats:** Binary subgroups are small (obesity: 4 yes / 8 no; hypothermia: \~7 yes / 5 no; hyperglycemia: 3 yes / 7 no; males: 4). All covariate findings should be treated as hypothesis-generating only. A future study with N ≥ 30 would be needed for adequate power.
+
+**Labeling flag:** Patient 0245's arterial well (F4) was transcribed as "245-2" in the plate map document (likely should be "245-4"). Results for this patient should be verified against original tube records before finalizing.

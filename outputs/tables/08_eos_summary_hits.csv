@@ -1,0 +1,26 @@
+analysis,platform,gene_symbol,eos_category,eos_role,logFC,p_value,direction
+Covariate: hyperglycemia,SomaScan,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",3.1200803656375213,2.089957601404851e-5,Up in Yes
+Delta: hypothermia,SomaScan,PENK,Precursor,"Proenkephalin → met-enkephalin, leu-enkephalin",1.1663266123382698,0.00139330350059745,Larger in Yes
+Delta: hyperglycemia,SomaScan,ANPEP,Degradation,Aminopeptidase N (APN/CD13): N-terminal enkephalin cleavage,-0.5921801858583997,0.00729431160057078,Smaller in Yes
+Covariate: hyperglycemia,SomaScan,PCSK1,Processing,PC1/3: POMC → β-endorphin / ACTH cleavage,0.8271457236305483,0.00801609468458922,Up in Yes
+Delta: hypothermia,SomaScan,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,0.5088165619332836,0.00926904023955427,Larger in Yes
+Delta: hyperglycemia,SomaScan,MME,Degradation,Neprilysin (NEP): primary enkephalin-degrading endopeptidase,-0.7715022629690982,0.00990669168747629,Smaller in Yes
+Delta: obese,SomaScan,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",-1.0443860844134991,0.01438896280803462,Smaller in Yes
+Covariate: obese,SomaScan,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",0.6958758374217962,0.01667964062126829,Up in Yes
+Delta: hyperglycemia,SomaScan,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,-1.3340789636577215,0.01740614392765932,Smaller in Yes
+Covariate: hyperglycemia,SomaScan,CPE,Processing,Carboxypeptidase E: opioid peptide maturation; circulates,2.637624965926994,0.01768060185896005,Up in Yes
+Delta: hypothermia,SomaScan,PNOC,Precursor,Pronociceptin → nociceptin/orphanin FQ (OFQ),-0.3412180832849753,0.02442003709800392,Smaller in Yes
+Covariate: obese,SomaScan,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",1.5744756274509435,0.02589914566541905,Up in Yes
+Delta: male,SomaScan,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.8916101188114671,0.02596400021756082,Smaller in Yes
+Delta: hyperglycemia,SomaScan,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",-1.3012541350090063,0.0292693663225606,Smaller in Yes
+Delta: obese,SomaScan,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,-0.33512392093194016,0.02942634322364847,Smaller in Yes
+Delta: hypothermia,SomaScan,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.8191308397180088,0.02959344172509,Smaller in Yes
+Delta: hyperglycemia,SomaScan,PREP,Degradation,Prolyl endopeptidase: neuropeptide degradation,-1.4689946867018369,0.03037235290848979,Smaller in Yes
+Delta: male,SomaScan,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,0.3295440728935105,0.03057062035286157,Larger in Yes
+Delta: hypothermia,SomaScan,POMC,Precursor,"Pro-opiomelanocortin → β-endorphin, ACTH, α-MSH",-0.2934069441581763,0.03657715049130611,Smaller in Yes
+Delta: obese,SomaScan,PENK,Precursor,"Proenkephalin → met-enkephalin, leu-enkephalin",-1.1604786306268449,0.04264641740389591,Smaller in Yes
+Delta: hypothermia,SomaScan,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,-0.1855826333846889,0.04338437310633023,Smaller in Yes
+Delta: male,SomaScan,BDNF,ECS-EOS crosstalk,BDNF upregulated by opioids and ECS; pain sensitization,-0.7071429840822067,0.04452406745159091,Smaller in Yes
+Delta: hypothermia,SomaScan,CRH,HPA axis,Corticotropin-releasing hormone: triggers ACTH/β-endorphin from pituitary,0.2605048051041739,0.04553134304960159,Larger in Yes
+Covariate: obese,SomaScan,PCSK1,Processing,PC1/3: POMC → β-endorphin / ACTH cleavage,0.4978958861334841,0.04588288367599432,Up in Yes
+A-V gradient,SomaScan,PCSK2,Processing,PC2: POMC → α-MSH / β-endorphin processing,-0.29910256676855124,0.04691444554741614,Venous > Arterial

@@ -1,0 +1,24 @@
+# ── Raw patient data — do NOT commit ──────────────────────────────────────────
+*.adat
+*.xlsx
+*.docx
+AP_65plex_byJMR.csv
+
+# ── R session artifacts ────────────────────────────────────────────────────────
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# ── Quarto render artifacts ────────────────────────────────────────────────────
+*_files/
+*.tex
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+.claude/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/

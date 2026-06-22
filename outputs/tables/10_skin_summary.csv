@@ -1,0 +1,39 @@
+analysis,family,gene_symbol,target,logFC,p_value,direction
+A-V gradient,SPINK,SPINK9,ISK9,-0.364,1.74e-4,Venous > Arterial
+Delta: hypothermia,KLK,KLK13,kallikrein 13,1.054,0.00111,Larger in Yes
+A-V gradient,KLK,KLK7,Kallikrein 7,-0.234,0.0018600000000000001,Venous > Arterial
+Delta: hypothermia,KLK,KLK14,kallikrein 14,0.826,0.00247,Larger in Yes
+Delta: hypothermia,SPINK,SPINK1,TATI,0.486,0.00331,Larger in Yes
+Covariate: hypothermia,SPINK,SPINK9,ISK9,0.788,0.00333,Up in Yes
+Delta: hyperglycemia,SPINK,SPINK8,ISK8,-0.63,0.00413,Smaller in Yes
+Covariate: hypothermia,KLK,KLK14,kallikrein 14,0.633,0.00491,Up in Yes
+Delta: hypothermia,KLK,KLK10,kallikrein 10,1.039,0.0053,Larger in Yes
+Delta: hypothermia,KLK,KLK14,kallikrein 14,0.839,0.00644,Larger in Yes
+Delta: hyperglycemia,KLK,KLK6,Kallikrein 6,-0.493,0.00666,Smaller in Yes
+Covariate: hypothermia,KLK,KLK14,kallikrein 14,0.651,0.00812,Up in Yes
+Covariate: obese,SPINK,SPINK6,ISK6,0.589,0.0118,Up in Yes
+Covariate: hypothermia,KLK,KLK13,kallikrein 13,0.786,0.0121,Up in Yes
+Covariate: hyperglycemia,KLK,KLK8,kallikrein 8,1.108,0.0175,Up in Yes
+Delta: hypothermia,SERPIN,SERPINA10,protein Z inhibitor,0.419,0.0194,Larger in Yes
+Covariate: hypothermia,SPINK,SPINK7,ISK7,1.018,0.0226,Up in Yes
+Delta: obese,KLK,KLK8,kallikrein 8,-0.759,0.0231,Smaller in Yes
+Delta: male,SERPIN,SERPINB4,SCCA2,0.433,0.0243,Larger in Yes
+Covariate: hypothermia,KLK,KLK10,kallikrein 10,0.688,0.0273,Up in Yes
+A-V gradient,KLK,KLK10,kallikrein 10,-0.553,0.028,Venous > Arterial
+A-V gradient,SERPIN,SERPINA10,protein Z inhibitor,-0.204,0.0309,Venous > Arterial
+Delta: male,SPINK,SPINK2,ISK2,0.626,0.0317,Larger in Yes
+Covariate: hypothermia,KLK,KLK8,kallikrein 8,0.799,0.0324,Up in Yes
+Delta: male,SERPIN,SERPINA10,protein Z inhibitor,0.256,0.0355,Larger in Yes
+Delta: male,SPINK,SPINK14,ISK52,0.257,0.0368,Larger in Yes
+Delta: obese,SPINK,SPINK5,SPINK5,-0.577,0.0394,Smaller in Yes
+Delta: male,SPINK,SPINK5,SPINK5,0.577,0.04,Larger in Yes
+Delta: obese,SERPIN,SERPINA10,protein Z inhibitor,-0.255,0.0402,Smaller in Yes
+Delta: male,KLK,KLK8,kallikrein 8,0.7,0.0405,Larger in Yes
+Covariate: hyperglycemia,SPINK,SPINK5,SPINK5,0.605,0.0426,Up in Yes
+Covariate: obese,SERPIN,SERPINA10,protein Z inhibitor,-0.49,0.0441,Up in No
+A-V gradient,KLK,KLK8,kallikrein 8,-0.188,0.0463,Venous > Arterial
+Delta: hyperglycemia,SPINK,SPINK7,ISK7,-0.489,0.0463,Smaller in Yes
+A-V gradient,SPINK,SPINK1,TATI,-0.177,0.0474,Venous > Arterial
+Covariate: hyperglycemia,SPINK,SPINK14,ISK52,0.576,0.0477,Up in Yes
+Covariate: hyperglycemia,KLK,KLK14,kallikrein 14,0.68,0.0488,Up in Yes
+Delta: obese,SPINK,SPINK14,ISK52,-0.248,0.0489,Smaller in Yes
