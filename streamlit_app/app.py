@@ -285,6 +285,8 @@ with tab_pca:
             fig_ld = go.Figure()
             for grp, col in [("Other", COL_NS), ("Searched", COL_SRC)]:
                 sub = df_ld[df_ld["_col"] == grp]
+                if sub.empty:
+                    continue
                 fig_ld.add_trace(go.Scatter(
                     x=sub["PC1"], y=sub["PC2"], mode="markers", name=grp,
                     text=sub["_tip"], hoverinfo="text",
