@@ -52,7 +52,8 @@ run_ora <- function(hit_syms, background_syms, gene_sets_df, min_overlap = 3) {
       n_hit      = a + b,
       n_background  = length(background_syms),
       odds_ratio = as.numeric(ft$estimate),
-      p_value    = ft$p.value
+      p_value    = ft$p.value,
+      hit_genes  = paste(sort(intersect(hit_syms, sets[[gs]])), collapse = ";")
     )
   }) |>
     bind_rows() -> out

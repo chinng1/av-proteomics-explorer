@@ -254,8 +254,8 @@ with st.sidebar:
                 unsafe_allow_html=True,
             )
 
-tab_vol, tab_pca, tab_gsea, tab_cov, tab_ora, tab_ecs, tab_skin = st.tabs([
-    "A-V Volcano", "PCA", "GSEA", "Covariate Explorer", "ORA", "ECS / EOS", "Skin Proteases"
+tab_vol, tab_pca, tab_gsea, tab_cov, tab_skin = st.tabs([
+    "A-V Volcano", "PCA", "GSEA", "Covariate Explorer", "Skin Proteases"
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -530,8 +530,103 @@ with tab_gsea:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Tab 4 — Covariate Explorer (A-A and V-V comparisons)
+# Tab 4 — Covariate Explorer (with integrated ORA)
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _cov_volcano(df_v, x_label, title, searched_genes, ora_genes):
+    """Shared volcano builder for covariate comparisons."""
+    COL_ORA = "#27ae60"
+    col_map = {"FDR < 0.05": "#ff7f00", "p < 0.05": COL_NOM,
+               "NS": COL_NS, "Searched": COL_SRC, "ORA pathway": COL_ORA}
+    df_v = df_v.copy()
+    df_v["_hi"]  = df_v["EntrezGeneSymbol"].str.upper().isin(searched_genes)
+    df_v["_ora"] = df_v["EntrezGeneSymbol"].str.upper().isin(
+        {g.upper() for g in ora_genes})
+    df_v["_grp"] = np.where(df_v["_hi"], "Searched",
+                   np.where(df_v["_ora"], "ORA pathway",
+                   df_v["sig"]))
+    fig = go.Figure()
+    for grp in ["NS", "p < 0.05", "FDR < 0.05", "ORA pathway", "Searched"]:
+        sub = df_v[df_v["_grp"] == grp]
+        if sub.empty: continue
+        tip = ("<b>" + sub["Target"].fillna("") + "</b> ("
+               + sub["EntrezGeneSymbol"].fillna("") + ")<br>"
+               + "logFC: " + sub["logFC"].round(3).astype(str) + "<br>"
+               + "p = " + sub["P.Value"].map(lambda x: f"{x:.3g}") + "<br>"
+               + "adj.p = " + sub["adj.P.Val"].map(lambda x: f"{x:.3g}"))
+        sz  = 10 if grp == "Searched" else (7 if grp == "ORA pathway" else
+              (5 if grp != "NS" else 3))
+        opc = 0.2 if grp == "NS" else 0.85
+        fig.add_trace(go.Scatter(
+            x=sub["logFC"], y=sub["neg_log10p"], mode="markers", name=grp,
+            text=tip, hoverinfo="text",
+            marker=dict(color=col_map[grp], size=sz, opacity=opc)))
+    for _, r in df_v[df_v["_hi"]].iterrows():
+        fig.add_annotation(x=r["logFC"], y=r["neg_log10p"],
+                           text=r["EntrezGeneSymbol"], showarrow=True, arrowhead=2,
+                           font=dict(size=11, color=COL_SRC),
+                           bgcolor="white", bordercolor=COL_SRC)
+    for _, r in df_v[df_v["_ora"] & ~df_v["_hi"]].head(20).iterrows():
+        fig.add_annotation(x=r["logFC"], y=r["neg_log10p"],
+                           text=r["EntrezGeneSymbol"], showarrow=True, arrowhead=2,
+                           font=dict(size=9, color=COL_ORA),
+                           bgcolor="white", bordercolor=COL_ORA)
+    fig.add_hline(y=-np.log10(0.05), line_dash="dot", line_color=COL_NOM, line_width=1)
+    fig.add_vline(x=0, line_dash="dot", line_color="gray", line_width=1)
+    fig.update_layout(title=title, xaxis_title=x_label, yaxis_title="-log10(p-value)",
+                      height=520, margin=dict(t=50, b=40), hovermode="closest")
+    return fig
+
+def _ora_pathway_selector(ora_df, key):
+    """Render pathway selectbox; return set of hit gene symbols for selected pathway."""
+    if ora_df.empty or "hit_genes" not in ora_df.columns:
+        if not ora_df.empty:
+            st.caption("Re-run `R_scripts/11_ora_surgery.R` to enable pathway gene highlighting.")
+        return set(), pd.DataFrame()
+    ora_df = ora_df.sort_values("p_value").copy()
+    ora_df["_label"] = (ora_df["direction"].str.upper() + " | "
+        + ora_df["pathway"]
+            .str.replace("^HALLMARK_", "", regex=True)
+            .str.replace("^KEGG_", "", regex=True)
+            .str.replace("_", " ").str.title()
+        + "  (p=" + ora_df["p_value"].map(lambda x: f"{x:.2g}") + ")")
+    options = ["(none — show all proteins)"] + ora_df["_label"].tolist()
+    sel = st.selectbox("Highlight ORA pathway on volcano", options, key=key)
+    if sel == "(none — show all proteins)":
+        return set(), ora_df
+    row = ora_df[ora_df["_label"] == sel].iloc[0]
+    genes = set(str(row["hit_genes"]).split(";")) if pd.notna(row["hit_genes"]) else set()
+    return genes, ora_df
+
+def _ora_table(ora_df):
+    if ora_df.empty: return
+    ora_df = ora_df.copy()
+    ora_df["pathway_clean"] = (ora_df["pathway"]
+        .str.replace("^HALLMARK_", "", regex=True)
+        .str.replace("^KEGG_", "", regex=True)
+        .str.replace("_", " ").str.title())
+    st.dataframe(
+        ora_df[["collection", "pathway_clean", "direction",
+                "n_hit_in_set", "n_set", "odds_ratio", "p_value", "padj"]]
+        .rename(columns={"collection": "Collection", "pathway_clean": "Pathway",
+                         "direction": "Dir", "n_hit_in_set": "Overlap",
+                         "n_set": "Set size", "odds_ratio": "OR",
+                         "p_value": "p", "padj": "adj.p"})
+        .assign(OR=lambda d: d["OR"].round(2),
+                p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
+                **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}),
+        use_container_width=True, hide_index=True)
+
+def _protein_table(df_v):
+    top = (df_v[df_v["P.Value"] < 0.05].sort_values("P.Value").head(200)
+           [["EntrezGeneSymbol", "Target", "logFC", "P.Value", "adj.P.Val"]]
+           .rename(columns={"EntrezGeneSymbol": "Gene", "Target": "Protein",
+                            "P.Value": "p", "adj.P.Val": "adj.p"})
+           .assign(logFC=lambda d: d["logFC"].round(3),
+                   p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
+                   **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}))
+    st.dataframe(top, use_container_width=True, hide_index=True)
+
 with tab_cov:
     if cov_art.empty and cov_ven.empty:
         st.warning("Run `R_scripts/05_covariate_analysis.R` to generate covariate outputs.")
@@ -541,27 +636,20 @@ with tab_cov:
                                      key="cov_draw")
         analysis_sel = cc2.selectbox("Analysis", ["Binary covariate", "Surgery type"],
                                      key="cov_analysis")
+        draw_key = draw_sel.replace("A-V Delta", "AV_Delta")
 
         # ── Binary covariate ──────────────────────────────────────────────────
         if analysis_sel == "Binary covariate":
             cov_sel = cc3.selectbox("Covariate", list(COV_LABELS.keys()),
                                     format_func=lambda x: COV_LABELS[x], key="cov_cov")
-
-            if draw_sel == "A-V Delta":
-                src = cov_delta
-            elif draw_sel == "Arterial":
-                src = cov_art
-            else:
-                src = cov_ven
+            src  = {"Arterial": cov_art, "Venous": cov_ven, "A-V Delta": cov_delta}[draw_sel]
             df_c = src[src["covariate"] == cov_sel].copy()
 
             if not df_c.empty:
                 df_c["neg_log10p"] = -np.log10(df_c["P.Value"].clip(lower=1e-300))
-                df_c["sig"]  = np.where(df_c["adj.P.Val"] < 0.05, "FDR < 0.05",
-                               np.where(df_c["P.Value"]   < 0.05, "p < 0.05", "NS"))
-                df_c["_hi"]  = df_c["EntrezGeneSymbol"].str.upper().isin(searched)
+                df_c["sig"] = np.where(df_c["adj.P.Val"] < 0.05, "FDR < 0.05",
+                              np.where(df_c["P.Value"]   < 0.05, "p < 0.05", "NS"))
                 n_pos = int(df_c["n_pos"].iloc[0]); n_neg = int(df_c["n_neg"].iloc[0])
-
                 label_pos, label_neg = COV_LABELS[cov_sel].split(" vs ")
                 x_label = f"log2FC ({label_pos} / {label_neg})  [n={n_pos} vs {n_neg}]"
                 n_nom = (df_c["P.Value"] < 0.05).sum()
@@ -569,76 +657,35 @@ with tab_cov:
                 st.caption(f"**{draw_sel}** · {COV_LABELS[cov_sel]} · "
                            f"{n_nom:,} nominal hits · {n_fdr} FDR hits")
 
-                col_map_c = {"FDR < 0.05": "#ff7f00", "p < 0.05": COL_NOM,
-                             "NS": COL_NS, "Searched": COL_SRC}
-                fig_c = go.Figure()
-                for grp in ["NS", "p < 0.05", "FDR < 0.05"]:
-                    sub = df_c[(df_c["sig"] == grp) & ~df_c["_hi"]]
-                    if sub.empty: continue
-                    tip = ("<b>" + sub["Target"].fillna("") + "</b> ("
-                           + sub["EntrezGeneSymbol"].fillna("") + ")<br>"
-                           + "logFC: " + sub["logFC"].round(3).astype(str) + "<br>"
-                           + "p = " + sub["P.Value"].map(lambda x: f"{x:.3g}") + "<br>"
-                           + "adj.p = " + sub["adj.P.Val"].map(lambda x: f"{x:.3g}"))
-                    fig_c.add_trace(go.Scatter(
-                        x=sub["logFC"], y=sub["neg_log10p"], mode="markers", name=grp,
-                        text=tip, hoverinfo="text",
-                        marker=dict(color=col_map_c[grp],
-                                    size=5 if grp != "NS" else 3,
-                                    opacity=0.8 if grp != "NS" else 0.2)))
-                hi = df_c[df_c["_hi"]]
-                if not hi.empty:
-                    tip_hi = ("<b>" + hi["Target"].fillna("") + "</b> ("
-                              + hi["EntrezGeneSymbol"].fillna("") + ")<br>"
-                              + "logFC: " + hi["logFC"].round(3).astype(str) + "<br>"
-                              + "p = " + hi["P.Value"].map(lambda x: f"{x:.3g}"))
-                    fig_c.add_trace(go.Scatter(
-                        x=hi["logFC"], y=hi["neg_log10p"], mode="markers", name="Searched",
-                        text=tip_hi, hoverinfo="text",
-                        marker=dict(color=COL_SRC, size=10, opacity=1.0)))
-                    for _, r in hi.iterrows():
-                        fig_c.add_annotation(x=r["logFC"], y=r["neg_log10p"],
-                                             text=r["EntrezGeneSymbol"], showarrow=True,
-                                             arrowhead=2, font=dict(size=11, color=COL_SRC),
-                                             bgcolor="white", bordercolor=COL_SRC)
-                fig_c.add_hline(y=-np.log10(0.05), line_dash="dot",
-                                line_color=COL_NOM, line_width=1)
-                fig_c.add_vline(x=0, line_dash="dot", line_color="gray", line_width=1)
-                fig_c.update_layout(
-                    title=f"{draw_sel}: {COV_LABELS[cov_sel]}",
-                    xaxis_title=x_label,
-                    yaxis_title="−log10(p-value)",
-                    height=500, margin=dict(t=50, b=40),
-                    hovermode="closest",
-                )
-                st.plotly_chart(fig_c, use_container_width=True)
+                ora_here = (ora_cov[(ora_cov["draw"] == draw_key) &
+                                    (ora_cov["covariate"] == cov_sel)]
+                            if not ora_cov.empty else pd.DataFrame())
+                ora_genes, ora_here = _ora_pathway_selector(ora_here, key="ora_sel_cov")
+                st.plotly_chart(
+                    _cov_volcano(df_c, x_label,
+                                 f"{draw_sel}: {COV_LABELS[cov_sel]}",
+                                 searched, ora_genes),
+                    use_container_width=True)
 
-                st.markdown("**Top hits (p < 0.05)**")
-                top_c = (df_c[df_c["P.Value"] < 0.05]
-                         .sort_values("P.Value")
-                         .head(200)
-                         [["EntrezGeneSymbol", "Target", "logFC", "P.Value", "adj.P.Val"]]
-                         .rename(columns={"EntrezGeneSymbol": "Gene", "Target": "Protein",
-                                          "P.Value": "p", "adj.P.Val": "adj.p"})
-                         .assign(logFC=lambda d: d["logFC"].round(3),
-                                 p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
-                                 **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}))
-                st.dataframe(top_c, use_container_width=True, hide_index=True)
+                t_col, o_col = st.columns(2)
+                with t_col:
+                    st.markdown("**Top protein hits (p < 0.05)**")
+                    _protein_table(df_c)
+                with o_col:
+                    if not ora_here.empty:
+                        st.markdown(f"**ORA pathways — {len(ora_here)} hits (p < 0.05)**")
+                        _ora_table(ora_here)
 
         # ── Surgery type ──────────────────────────────────────────────────────
         else:
             surg_view = cc3.selectbox(
-                "View",
-                ["Omnibus F-test"] + list(CONTRAST_DISPLAY.values()),
-                key="cov_surg"
-            )
-
-            if draw_sel == "Arterial":
-                omni_df, pw_df = surg_art_omni, surg_art_pw
-            elif draw_sel == "Venous":
-                omni_df, pw_df = surg_ven_omni, surg_ven_pw
-            else:
-                omni_df, pw_df = delta_surg_omni, delta_surg_pw
+                "View", ["Omnibus F-test"] + list(CONTRAST_DISPLAY.values()),
+                key="cov_surg")
+            omni_df, pw_df = {
+                "Arterial":  (surg_art_omni, surg_art_pw),
+                "Venous":    (surg_ven_omni, surg_ven_pw),
+                "A-V Delta": (delta_surg_omni, delta_surg_pw),
+            }[draw_sel]
 
             if surg_view == "Omnibus F-test":
                 if omni_df.empty:
@@ -647,57 +694,39 @@ with tab_cov:
                     df_omni = omni_df.copy()
                     df_omni["neg_log10p"] = -np.log10(df_omni["P.Value"].clip(lower=1e-300))
                     n_hits = (df_omni["P.Value"] < 0.05).sum()
-                    st.caption(f"**{draw_sel}** · Surgery type omnibus F-test · "
+                    st.caption(f"**{draw_sel}** · Surgery omnibus F-test · "
                                f"{n_hits:,} hits at p < 0.05")
-
                     top30 = df_omni.nsmallest(30, "P.Value").copy()
                     top30["label"] = top30["Target"].fillna(top30["AptName"])
-                    top30["_hi"]   = top30["EntrezGeneSymbol"].str.upper().isin(searched)
-                    top30["color"] = top30["_hi"].map(
+                    top30["color"] = top30["EntrezGeneSymbol"].str.upper().isin(searched).map(
                         lambda v: COL_SRC if v else COL_NOM)
-
-                    tip_o = (
-                        "<b>" + top30["Target"].fillna("") + "</b> ("
-                        + top30["EntrezGeneSymbol"].fillna("") + ")<br>"
-                        + "F = " + top30["F"].round(2).astype(str) + "<br>"
-                        + "p = " + top30["P.Value"].map(lambda x: f"{x:.3g}") + "<br>"
-                        + "Spine vs Lap logFC: "
-                        + top30["Spine_vs_Laparoscopic"].round(3).astype(str) + "<br>"
-                        + "Spine vs H/N logFC: "
-                        + top30["Spine_vs_HeadNeck"].round(3).astype(str) + "<br>"
-                        + "Lap vs H/N logFC: "
-                        + top30["Laparoscopic_vs_HeadNeck"].round(3).astype(str)
-                    )
+                    tip_o = ("<b>" + top30["Target"].fillna("") + "</b><br>"
+                             + "F = " + top30["F"].round(2).astype(str) + "<br>"
+                             + "p = " + top30["P.Value"].map(lambda x: f"{x:.3g}") + "<br>"
+                             + "Spine/Lap: " + top30["Spine_vs_Laparoscopic"].round(3).astype(str)
+                             + "  Spine/H-N: " + top30["Spine_vs_HeadNeck"].round(3).astype(str)
+                             + "  Lap/H-N: " + top30["Laparoscopic_vs_HeadNeck"].round(3).astype(str))
                     fig_omni = go.Figure(go.Bar(
-                        x=top30["neg_log10p"],
-                        y=top30["label"],
-                        orientation="h",
-                        marker_color=top30["color"].tolist(),
-                        text=tip_o, hoverinfo="text",
-                    ))
+                        x=top30["neg_log10p"], y=top30["label"], orientation="h",
+                        marker_color=top30["color"].tolist(), text=tip_o, hoverinfo="text"))
                     fig_omni.add_vline(x=-np.log10(0.05), line_dash="dot",
                                        line_color=COL_NOM, line_width=1)
                     fig_omni.update_layout(
-                        title=f"{draw_sel}: Surgery type omnibus — top 30 proteins",
-                        xaxis_title="−log10(p-value)",
+                        title=f"{draw_sel}: Surgery omnibus — top 30 proteins",
+                        xaxis_title="-log10(p-value)",
                         yaxis=dict(autorange="reversed", tickfont=dict(size=10)),
-                        height=max(450, len(top30) * 20 + 80),
-                        margin=dict(l=160, t=50),
-                    )
+                        height=max(450, len(top30) * 20 + 80), margin=dict(l=160, t=50))
                     st.plotly_chart(fig_omni, use_container_width=True)
-
                     st.markdown("**Full omnibus results (p < 0.05)**")
-                    disp_o = (df_omni[df_omni["P.Value"] < 0.05]
-                              .sort_values("P.Value")
+                    disp_o = (df_omni[df_omni["P.Value"] < 0.05].sort_values("P.Value")
                               [["EntrezGeneSymbol", "Target", "F", "P.Value", "adj.P.Val",
                                 "Spine_vs_Laparoscopic", "Spine_vs_HeadNeck",
                                 "Laparoscopic_vs_HeadNeck"]]
-                              .rename(columns={
-                                  "EntrezGeneSymbol": "Gene", "Target": "Protein",
-                                  "P.Value": "p", "adj.P.Val": "adj.p",
-                                  "Spine_vs_Laparoscopic": "logFC Spine/Lap",
-                                  "Spine_vs_HeadNeck": "logFC Spine/H-N",
-                                  "Laparoscopic_vs_HeadNeck": "logFC Lap/H-N"})
+                              .rename(columns={"EntrezGeneSymbol": "Gene", "Target": "Protein",
+                                               "P.Value": "p", "adj.P.Val": "adj.p",
+                                               "Spine_vs_Laparoscopic": "logFC Spine/Lap",
+                                               "Spine_vs_HeadNeck": "logFC Spine/H-N",
+                                               "Laparoscopic_vs_HeadNeck": "logFC Lap/H-N"})
                               .assign(F=lambda d: d["F"].round(2),
                                       p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
                                       **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}"),
@@ -709,263 +738,37 @@ with tab_cov:
             else:
                 ct_key = CONTRAST_LOOKUP[surg_view]
                 df_pw  = pw_df[pw_df["contrast"] == ct_key].copy()
-
                 if df_pw.empty:
                     st.info("No pairwise data available.")
                 else:
                     df_pw["neg_log10p"] = -np.log10(df_pw["P.Value"].clip(lower=1e-300))
-                    df_pw["sig"]  = np.where(df_pw["adj.P.Val"] < 0.05, "FDR < 0.05",
-                                    np.where(df_pw["P.Value"]   < 0.05, "p < 0.05", "NS"))
-                    df_pw["_hi"]  = df_pw["EntrezGeneSymbol"].str.upper().isin(searched)
+                    df_pw["sig"] = np.where(df_pw["adj.P.Val"] < 0.05, "FDR < 0.05",
+                                   np.where(df_pw["P.Value"]   < 0.05, "p < 0.05", "NS"))
                     n_nom = (df_pw["P.Value"] < 0.05).sum()
                     n_fdr = (df_pw["adj.P.Val"] < 0.05).sum()
                     st.caption(f"**{draw_sel}** · {surg_view} · "
                                f"{n_nom:,} nominal hits · {n_fdr} FDR hits")
 
-                    col_map_pw = {"FDR < 0.05": "#ff7f00", "p < 0.05": COL_NOM,
-                                  "NS": COL_NS, "Searched": COL_SRC}
-                    fig_pw = go.Figure()
-                    for grp in ["NS", "p < 0.05", "FDR < 0.05"]:
-                        sub = df_pw[(df_pw["sig"] == grp) & ~df_pw["_hi"]]
-                        if sub.empty: continue
-                        tip = ("<b>" + sub["Target"].fillna("") + "</b> ("
-                               + sub["EntrezGeneSymbol"].fillna("") + ")<br>"
-                               + "logFC: " + sub["logFC"].round(3).astype(str) + "<br>"
-                               + "p = " + sub["P.Value"].map(lambda x: f"{x:.3g}"))
-                        fig_pw.add_trace(go.Scatter(
-                            x=sub["logFC"], y=sub["neg_log10p"], mode="markers", name=grp,
-                            text=tip, hoverinfo="text",
-                            marker=dict(color=col_map_pw[grp],
-                                        size=5 if grp != "NS" else 3,
-                                        opacity=0.8 if grp != "NS" else 0.2)))
-                    hi = df_pw[df_pw["_hi"]]
-                    if not hi.empty:
-                        tip_hi = ("<b>" + hi["Target"].fillna("") + "</b> ("
-                                  + hi["EntrezGeneSymbol"].fillna("") + ")<br>"
-                                  + "logFC: " + hi["logFC"].round(3).astype(str) + "<br>"
-                                  + "p = " + hi["P.Value"].map(lambda x: f"{x:.3g}"))
-                        fig_pw.add_trace(go.Scatter(
-                            x=hi["logFC"], y=hi["neg_log10p"], mode="markers", name="Searched",
-                            text=tip_hi, hoverinfo="text",
-                            marker=dict(color=COL_SRC, size=10, opacity=1.0)))
-                        for _, r in hi.iterrows():
-                            fig_pw.add_annotation(x=r["logFC"], y=r["neg_log10p"],
-                                                  text=r["EntrezGeneSymbol"], showarrow=True,
-                                                  arrowhead=2, font=dict(size=11, color=COL_SRC),
-                                                  bgcolor="white", bordercolor=COL_SRC)
-                    fig_pw.add_hline(y=-np.log10(0.05), line_dash="dot",
-                                     line_color=COL_NOM, line_width=1)
-                    fig_pw.add_vline(x=0, line_dash="dot", line_color="gray", line_width=1)
+                    ora_here = (ora_surg[(ora_surg["draw"] == draw_key) &
+                                         (ora_surg["contrast"] == ct_key)]
+                                if not ora_surg.empty else pd.DataFrame())
+                    ora_genes, ora_here = _ora_pathway_selector(ora_here, key="ora_sel_surg")
                     parts = surg_view.split(" vs ")
-                    fig_pw.update_layout(
-                        title=f"{draw_sel}: {surg_view}",
-                        xaxis_title=f"log2FC ({parts[0]} / {parts[1]})",
-                        yaxis_title="−log10(p-value)",
-                        height=500, margin=dict(t=50, b=40),
-                        hovermode="closest",
-                    )
-                    st.plotly_chart(fig_pw, use_container_width=True)
+                    st.plotly_chart(
+                        _cov_volcano(df_pw,
+                                     f"log2FC ({parts[0]} / {parts[1]})",
+                                     f"{draw_sel}: {surg_view}",
+                                     searched, ora_genes),
+                        use_container_width=True)
 
-                    st.markdown("**Top hits (p < 0.05)**")
-                    top_pw = (df_pw[df_pw["P.Value"] < 0.05]
-                              .sort_values("P.Value")
-                              .head(200)
-                              [["EntrezGeneSymbol", "Target", "logFC", "P.Value", "adj.P.Val"]]
-                              .rename(columns={"EntrezGeneSymbol": "Gene", "Target": "Protein",
-                                               "P.Value": "p", "adj.P.Val": "adj.p"})
-                              .assign(logFC=lambda d: d["logFC"].round(3),
-                                      p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
-                                      **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}))
-                    st.dataframe(top_pw, use_container_width=True, hide_index=True)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Tab 5 — ORA
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_ora:
-    if ora_surg.empty and ora_cov.empty:
-        st.warning("Run `R_scripts/11_ora_surgery.R` to generate ORA outputs.")
-    else:
-        oa1, oa2, oa3, oa4 = st.columns(4)
-        ora_analysis = oa1.selectbox("Analysis", ["Binary covariate", "Surgery contrast"],
-                                     key="ora_analysis")
-
-        if ora_analysis == "Binary covariate":
-            base_df = ora_cov.copy() if not ora_cov.empty else pd.DataFrame()
-            ora_draw = oa2.selectbox("Compartment",
-                                     ["Arterial", "Venous", "AV_Delta"],
-                                     format_func=lambda x: x.replace("AV_Delta", "A-V Delta"),
-                                     key="ora_draw_cov")
-            ora_group = oa3.selectbox("Covariate", list(COV_LABELS.keys()),
-                                      format_func=lambda x: COV_LABELS[x],
-                                      key="ora_cov_sel")
-            group_col, group_val = "covariate", ora_group
-        else:
-            base_df = ora_surg.copy() if not ora_surg.empty else pd.DataFrame()
-            ora_draw = oa2.selectbox("Compartment",
-                                     ["Arterial", "Venous", "AV_Delta"],
-                                     format_func=lambda x: x.replace("AV_Delta", "A-V Delta"),
-                                     key="ora_draw_surg")
-            ora_group = oa3.selectbox("Contrast", list(CONTRAST_DISPLAY.values()),
-                                      key="ora_contrast_sel")
-            group_col, group_val = "contrast", CONTRAST_LOOKUP[ora_group]
-
-        ora_dir = oa4.selectbox("Direction",
-                                ["Both", "Up (higher in group 1)", "Down (higher in group 2)"],
-                                key="ora_dir")
-
-        if base_df.empty:
-            st.info("No ORA results found.")
-        else:
-            df_ora = base_df[
-                (base_df["draw"] == ora_draw) &
-                (base_df[group_col] == group_val)
-            ].copy()
-
-            if ora_dir == "Up (higher in group 1)":
-                df_ora = df_ora[df_ora["direction"] == "up"]
-            elif ora_dir == "Down (higher in group 2)":
-                df_ora = df_ora[df_ora["direction"] == "down"]
-
-            df_ora["pathway_clean"] = (df_ora["pathway"]
-                .str.replace("^HALLMARK_", "", regex=True)
-                .str.replace("^KEGG_", "", regex=True)
-                .str.replace("_", " ")
-                .str.title())
-            df_ora["neg_log10p"] = -np.log10(df_ora["p_value"].clip(lower=1e-300))
-            df_ora = df_ora.sort_values("p_value")
-
-            n_hits = len(df_ora)
-            st.caption(f"**{n_hits} pathway hits** (p < 0.05) for the selected filters")
-
-            if n_hits == 0:
-                st.info("No enriched pathways for this combination.")
-            else:
-                top_n = df_ora.head(25).copy()
-                dir_colors = {"up": COL_ART, "down": COL_VEN}
-                bar_colors = top_n["direction"].map(dir_colors).tolist()
-
-                tip_ora = (
-                    "<b>" + top_n["pathway_clean"] + "</b><br>"
-                    + "Collection: " + top_n["collection"] + "<br>"
-                    + "Overlap: " + top_n["n_hit_in_set"].astype(str)
-                    + " / " + top_n["n_set"].astype(str) + " genes in set<br>"
-                    + "Odds ratio: " + top_n["odds_ratio"].round(2).astype(str) + "<br>"
-                    + "p = " + top_n["p_value"].map(lambda x: f"{x:.3g}") + "<br>"
-                    + "adj.p = " + top_n["padj"].map(lambda x: f"{x:.3g}") + "<br>"
-                    + "Direction: " + top_n["direction"]
-                )
-
-                fig_ora = go.Figure(go.Bar(
-                    x=top_n["neg_log10p"],
-                    y=top_n["pathway_clean"],
-                    orientation="h",
-                    marker_color=bar_colors,
-                    text=tip_ora, hoverinfo="text",
-                ))
-                fig_ora.add_vline(x=-np.log10(0.05), line_dash="dot",
-                                  line_color=COL_NOM, line_width=1)
-                fig_ora.update_layout(
-                    title=f"Top pathways — red = higher in group 1, blue = higher in group 2",
-                    xaxis_title="-log10(p-value)",
-                    yaxis=dict(autorange="reversed", tickfont=dict(size=10)),
-                    height=max(400, len(top_n) * 22 + 80),
-                    margin=dict(l=280, t=50),
-                )
-                st.plotly_chart(fig_ora, use_container_width=True)
-
-                st.markdown("**All pathway hits (p < 0.05)**")
-                disp_ora = (df_ora[["collection", "pathway_clean", "direction",
-                                    "n_hit_in_set", "n_set", "odds_ratio",
-                                    "p_value", "padj"]]
-                            .rename(columns={
-                                "collection": "Collection",
-                                "pathway_clean": "Pathway",
-                                "direction": "Dir",
-                                "n_hit_in_set": "Overlap",
-                                "n_set": "Set size",
-                                "odds_ratio": "OR",
-                                "p_value": "p",
-                                "padj": "adj.p"})
-                            .assign(OR=lambda d: d["OR"].round(2),
-                                    p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
-                                    **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}))
-                st.dataframe(disp_ora, use_container_width=True, hide_index=True)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Tab 6 — ECS / EOS
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_ecs:
-    if ecs_eos.empty:
-        st.warning("Run `R_scripts/08_endocannabinoid_analysis.R` and "
-                   "`R_scripts/09_opioid_analysis.R` to generate ECS/EOS outputs.")
-    else:
-        ec1, ec2 = st.columns(2)
-        e_sys  = ec1.selectbox("System", ["Both", "ECS", "EOS"])
-        e_plat = ec2.selectbox("Platform", ["All", "Luminex", "SomaScan"])
-
-        df_ecs = ecs_eos.copy()
-        if e_sys != "Both":
-            df_ecs = df_ecs[df_ecs["system"] == e_sys]
-        if e_plat != "All":
-            df_ecs = df_ecs[df_ecs["platform"] == e_plat]
-        df_ecs = df_ecs.sort_values("p_value")
-
-        st.markdown(f"**{len(df_ecs)} hits** — click a row to highlight on volcano")
-        sel_e = st.dataframe(
-            df_ecs[["system", "analysis", "platform", "gene_symbol",
-                    "category", "logFC", "p_value", "direction"]]
-            .rename(columns={"system": "System", "analysis": "Analysis",
-                             "platform": "Platform", "gene_symbol": "Gene",
-                             "category": "Category", "p_value": "p",
-                             "direction": "Direction"})
-            .assign(logFC=lambda d: d["logFC"].round(3),
-                    p=lambda d: d["p"].map(lambda x: f"{x:.3g}")),
-            use_container_width=True, hide_index=True,
-            on_select="rerun", selection_mode="single-row",
-        )
-
-        sel_gene = set()
-        if sel_e and sel_e.selection.rows:
-            g = df_ecs.iloc[sel_e.selection.rows[0]]["gene_symbol"]
-            sel_gene = {str(g).upper()}
-
-        all_ecs_genes = set(ecs_eos["gene_symbol"].str.upper())
-        df_ev = av.copy()
-        df_ev["_grp"] = np.where(
-            df_ev["EntrezGeneSymbol"].str.upper().isin(searched | sel_gene),
-                "Searched/Selected",
-            np.where(df_ev["EntrezGeneSymbol"].str.upper().isin(all_ecs_genes),
-                "ECS/EOS", df_ev["sig_label"]))
-
-        col_map_e = {"Searched/Selected": COL_SRC, "ECS/EOS": COL_LE,
-                     "FDR < 0.05": "#ff7f00", "p < 0.05": COL_NOM, "NS": COL_NS}
-        fig_ev = go.Figure()
-        for grp in ["NS", "p < 0.05", "FDR < 0.05", "ECS/EOS", "Searched/Selected"]:
-            sub = df_ev[df_ev["_grp"] == grp]
-            if sub.empty:
-                continue
-            tip = ("<b>" + sub["Target"].fillna("") + "</b> ("
-                   + sub["EntrezGeneSymbol"].fillna("") + ")<br>"
-                   + "logFC: " + sub["logFC"].round(3).astype(str)
-                   + "  p=" + sub["P.Value"].map(lambda x: f"{x:.3g}"))
-            fig_ev.add_trace(go.Scatter(
-                x=sub["logFC"], y=sub["neg_log10p"], mode="markers", name=grp,
-                text=tip, hoverinfo="text",
-                marker=dict(color=col_map_e[grp],
-                            size=np.where(grp in ("ECS/EOS", "Searched/Selected"), 7, 3),
-                            opacity=0.2 if grp == "NS" else 0.8)
-            ))
-        fig_ev.add_hline(y=-np.log10(0.05), line_dash="dot", line_color=COL_NOM, line_width=1)
-        fig_ev.add_vline(x=0, line_dash="dot", line_color="gray", line_width=1)
-        fig_ev.update_layout(
-            title="ECS / EOS gene positions on A-V volcano",
-            xaxis_title="log2FC (Arterial / Venous)",
-            yaxis_title="−log10(p-value)",
-            height=480, margin=dict(t=50),
-        )
-        st.plotly_chart(fig_ev, use_container_width=True)
+                    t_col, o_col = st.columns(2)
+                    with t_col:
+                        st.markdown("**Top protein hits (p < 0.05)**")
+                        _protein_table(df_pw)
+                    with o_col:
+                        if not ora_here.empty:
+                            st.markdown(f"**ORA pathways — {len(ora_here)} hits (p < 0.05)**")
+                            _ora_table(ora_here)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
