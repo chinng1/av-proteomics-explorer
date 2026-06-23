@@ -69,17 +69,19 @@ def load_data():
     surg_ven_pw    = rd("05_venous_surgery_pairwise.csv")
     delta_surg_omni = rd("06_delta_surgery_omnibus.csv")
     delta_surg_pw   = rd("06_delta_surgery_pairwise.csv")
+    ora_surg = rd("11_ora_surgery_top.csv")
+    ora_cov  = rd("11_ora_covariate_top.csv")
     skin_av        = rd("10_skin_av.csv")
     skin_kw        = rd("10_skin_surgery_kw.csv")
     return (av, loadings, pca_var, pca_sc, gsea_h, gsea_k, ecs, eos8, eos9, cov,
             cov_art, cov_ven, cov_delta, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
-            delta_surg_omni, delta_surg_pw, skin_av, skin_kw)
+            delta_surg_omni, delta_surg_pw, ora_surg, ora_cov, skin_av, skin_kw)
 
 
 (av, loadings, pca_var, pca_sc,
  gsea_h, gsea_k, ecs_hits, eos8_hits, eos9_hits, cov_res,
  cov_art, cov_ven, cov_delta, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
- delta_surg_omni, delta_surg_pw, skin_av, skin_kw) = load_data()
+ delta_surg_omni, delta_surg_pw, ora_surg, ora_cov, skin_av, skin_kw) = load_data()
 
 # ── Pre-process A-V table ──────────────────────────────────────────────────────
 if not av.empty:
@@ -252,8 +254,8 @@ with st.sidebar:
                 unsafe_allow_html=True,
             )
 
-tab_vol, tab_pca, tab_gsea, tab_cov, tab_ecs, tab_skin = st.tabs([
-    "A-V Volcano", "PCA", "GSEA", "Covariate Explorer", "ECS / EOS", "Skin Proteases"
+tab_vol, tab_pca, tab_gsea, tab_cov, tab_ora, tab_ecs, tab_skin = st.tabs([
+    "A-V Volcano", "PCA", "GSEA", "Covariate Explorer", "ORA", "ECS / EOS", "Skin Proteases"
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -778,7 +780,121 @@ with tab_cov:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Tab 5 — ECS / EOS
+# Tab 5 — ORA
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_ora:
+    if ora_surg.empty and ora_cov.empty:
+        st.warning("Run `R_scripts/11_ora_surgery.R` to generate ORA outputs.")
+    else:
+        oa1, oa2, oa3, oa4 = st.columns(4)
+        ora_analysis = oa1.selectbox("Analysis", ["Binary covariate", "Surgery contrast"],
+                                     key="ora_analysis")
+
+        if ora_analysis == "Binary covariate":
+            base_df = ora_cov.copy() if not ora_cov.empty else pd.DataFrame()
+            ora_draw = oa2.selectbox("Compartment",
+                                     ["Arterial", "Venous", "AV_Delta"],
+                                     format_func=lambda x: x.replace("AV_Delta", "A-V Delta"),
+                                     key="ora_draw_cov")
+            ora_group = oa3.selectbox("Covariate", list(COV_LABELS.keys()),
+                                      format_func=lambda x: COV_LABELS[x],
+                                      key="ora_cov_sel")
+            group_col, group_val = "covariate", ora_group
+        else:
+            base_df = ora_surg.copy() if not ora_surg.empty else pd.DataFrame()
+            ora_draw = oa2.selectbox("Compartment",
+                                     ["Arterial", "Venous", "AV_Delta"],
+                                     format_func=lambda x: x.replace("AV_Delta", "A-V Delta"),
+                                     key="ora_draw_surg")
+            ora_group = oa3.selectbox("Contrast", list(CONTRAST_DISPLAY.values()),
+                                      key="ora_contrast_sel")
+            group_col, group_val = "contrast", CONTRAST_LOOKUP[ora_group]
+
+        ora_dir = oa4.selectbox("Direction",
+                                ["Both", "Up (higher in group 1)", "Down (higher in group 2)"],
+                                key="ora_dir")
+
+        if base_df.empty:
+            st.info("No ORA results found.")
+        else:
+            df_ora = base_df[
+                (base_df["draw"] == ora_draw) &
+                (base_df[group_col] == group_val)
+            ].copy()
+
+            if ora_dir == "Up (higher in group 1)":
+                df_ora = df_ora[df_ora["direction"] == "up"]
+            elif ora_dir == "Down (higher in group 2)":
+                df_ora = df_ora[df_ora["direction"] == "down"]
+
+            df_ora["pathway_clean"] = (df_ora["pathway"]
+                .str.replace("^HALLMARK_", "", regex=True)
+                .str.replace("^KEGG_", "", regex=True)
+                .str.replace("_", " ")
+                .str.title())
+            df_ora["neg_log10p"] = -np.log10(df_ora["p_value"].clip(lower=1e-300))
+            df_ora = df_ora.sort_values("p_value")
+
+            n_hits = len(df_ora)
+            st.caption(f"**{n_hits} pathway hits** (p < 0.05) for the selected filters")
+
+            if n_hits == 0:
+                st.info("No enriched pathways for this combination.")
+            else:
+                top_n = df_ora.head(25).copy()
+                dir_colors = {"up": COL_ART, "down": COL_VEN}
+                bar_colors = top_n["direction"].map(dir_colors).tolist()
+
+                tip_ora = (
+                    "<b>" + top_n["pathway_clean"] + "</b><br>"
+                    + "Collection: " + top_n["collection"] + "<br>"
+                    + "Overlap: " + top_n["n_hit_in_set"].astype(str)
+                    + " / " + top_n["n_set"].astype(str) + " genes in set<br>"
+                    + "Odds ratio: " + top_n["odds_ratio"].round(2).astype(str) + "<br>"
+                    + "p = " + top_n["p_value"].map(lambda x: f"{x:.3g}") + "<br>"
+                    + "adj.p = " + top_n["padj"].map(lambda x: f"{x:.3g}") + "<br>"
+                    + "Direction: " + top_n["direction"]
+                )
+
+                fig_ora = go.Figure(go.Bar(
+                    x=top_n["neg_log10p"],
+                    y=top_n["pathway_clean"],
+                    orientation="h",
+                    marker_color=bar_colors,
+                    text=tip_ora, hoverinfo="text",
+                ))
+                fig_ora.add_vline(x=-np.log10(0.05), line_dash="dot",
+                                  line_color=COL_NOM, line_width=1)
+                fig_ora.update_layout(
+                    title=f"Top pathways — red = higher in group 1, blue = higher in group 2",
+                    xaxis_title="-log10(p-value)",
+                    yaxis=dict(autorange="reversed", tickfont=dict(size=10)),
+                    height=max(400, len(top_n) * 22 + 80),
+                    margin=dict(l=280, t=50),
+                )
+                st.plotly_chart(fig_ora, use_container_width=True)
+
+                st.markdown("**All pathway hits (p < 0.05)**")
+                disp_ora = (df_ora[["collection", "pathway_clean", "direction",
+                                    "n_hit_in_set", "n_set", "odds_ratio",
+                                    "p_value", "padj"]]
+                            .rename(columns={
+                                "collection": "Collection",
+                                "pathway_clean": "Pathway",
+                                "direction": "Dir",
+                                "n_hit_in_set": "Overlap",
+                                "n_set": "Set size",
+                                "odds_ratio": "OR",
+                                "p_value": "p",
+                                "padj": "adj.p"})
+                            .assign(OR=lambda d: d["OR"].round(2),
+                                    p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
+                                    **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}))
+                st.dataframe(disp_ora, use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tab 6 — ECS / EOS
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_ecs:
     if ecs_eos.empty:
