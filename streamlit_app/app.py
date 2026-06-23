@@ -163,6 +163,19 @@ CONTRAST_LOOKUP = {v: k for k, v in CONTRAST_DISPLAY.items()}
 def direction_color(logfc):
     return COL_VEN if logfc < 0 else COL_ART
 
+def _add_direction_labels(fig, left_label, right_label):
+    """Add directional labels to left and right sides of a volcano's zero line."""
+    for text, x, anchor in [
+        (f"← {left_label} higher",  0.01, "left"),
+        (f"{right_label} higher →", 0.99, "right"),
+    ]:
+        fig.add_annotation(
+            x=x, y=0.99, xref="paper", yref="paper",
+            text=text, showarrow=False,
+            xanchor=anchor, yanchor="top",
+            font=dict(size=11, color="#888888"),
+        )
+
 def av_volcano_fig(df, highlight_genes=None, le_genes=None, title="A-V Volcano"):
     """Shared volcano builder used by multiple tabs."""
     df = df.copy()
@@ -211,6 +224,7 @@ def av_volcano_fig(df, highlight_genes=None, le_genes=None, title="A-V Volcano")
                            font=dict(size=11, color=COL_SRC if r["_hi"] else COL_LE),
                            bgcolor="white",
                            bordercolor=COL_SRC if r["_hi"] else COL_LE)
+    _add_direction_labels(fig, "Venous", "Arterial")
     fig.update_layout(
         title=title,
         xaxis_title="log2FC (Arterial / Venous)",
@@ -533,7 +547,8 @@ with tab_gsea:
 # Tab 4 — Covariate Explorer (with integrated ORA)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _cov_volcano(df_v, x_label, title, searched_genes, ora_genes):
+def _cov_volcano(df_v, x_label, title, searched_genes, ora_genes,
+                 left_label="", right_label=""):
     """Shared volcano builder for covariate comparisons."""
     COL_ORA = "#27ae60"
     col_map = {"FDR < 0.05": "#ff7f00", "p < 0.05": COL_NOM,
@@ -573,6 +588,8 @@ def _cov_volcano(df_v, x_label, title, searched_genes, ora_genes):
                            bgcolor="white", bordercolor=COL_ORA)
     fig.add_hline(y=-np.log10(0.05), line_dash="dot", line_color=COL_NOM, line_width=1)
     fig.add_vline(x=0, line_dash="dot", line_color="gray", line_width=1)
+    if left_label and right_label:
+        _add_direction_labels(fig, left_label, right_label)
     fig.update_layout(title=title, xaxis_title=x_label, yaxis_title="-log10(p-value)",
                       height=520, margin=dict(t=50, b=40), hovermode="closest")
     return fig
@@ -661,10 +678,12 @@ with tab_cov:
                                     (ora_cov["covariate"] == cov_sel)]
                             if not ora_cov.empty else pd.DataFrame())
                 ora_genes, ora_here = _ora_pathway_selector(ora_here, key="ora_sel_cov")
+                lbl_pos, lbl_neg = COV_LABELS[cov_sel].split(" vs ")
                 st.plotly_chart(
                     _cov_volcano(df_c, x_label,
                                  f"{draw_sel}: {COV_LABELS[cov_sel]}",
-                                 searched, ora_genes),
+                                 searched, ora_genes,
+                                 left_label=lbl_neg, right_label=lbl_pos),
                     use_container_width=True)
 
                 t_col, o_col = st.columns(2)
@@ -758,7 +777,8 @@ with tab_cov:
                         _cov_volcano(df_pw,
                                      f"log2FC ({parts[0]} / {parts[1]})",
                                      f"{draw_sel}: {surg_view}",
-                                     searched, ora_genes),
+                                     searched, ora_genes,
+                                     left_label=parts[1], right_label=parts[0]),
                         use_container_width=True)
 
                     t_col, o_col = st.columns(2)
