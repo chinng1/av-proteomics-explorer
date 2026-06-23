@@ -62,6 +62,7 @@ def load_data():
     cov            = rd("05_covariate_results.csv")
     cov_art        = rd("05_arterial_results.csv")
     cov_ven        = rd("05_venous_results.csv")
+    cov_delta      = rd("06_delta_results.csv")
     surg_art_omni  = rd("05_arterial_surgery_omnibus.csv")
     surg_art_pw    = rd("05_arterial_surgery_pairwise.csv")
     surg_ven_omni  = rd("05_venous_surgery_omnibus.csv")
@@ -71,13 +72,13 @@ def load_data():
     skin_av        = rd("10_skin_av.csv")
     skin_kw        = rd("10_skin_surgery_kw.csv")
     return (av, loadings, pca_var, pca_sc, gsea_h, gsea_k, ecs, eos8, eos9, cov,
-            cov_art, cov_ven, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
+            cov_art, cov_ven, cov_delta, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
             delta_surg_omni, delta_surg_pw, skin_av, skin_kw)
 
 
 (av, loadings, pca_var, pca_sc,
  gsea_h, gsea_k, ecs_hits, eos8_hits, eos9_hits, cov_res,
- cov_art, cov_ven, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
+ cov_art, cov_ven, cov_delta, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
  delta_surg_omni, delta_surg_pw, skin_av, skin_kw) = load_data()
 
 # ── Pre-process A-V table ──────────────────────────────────────────────────────
@@ -545,12 +546,12 @@ with tab_cov:
                                     format_func=lambda x: COV_LABELS[x], key="cov_cov")
 
             if draw_sel == "A-V Delta":
-                st.info("Binary covariate analysis on the A-V delta is in `06_delta_results.csv` "
-                        "— not yet wired into this view. Select Arterial or Venous.")
-                df_c = pd.DataFrame()
+                src = cov_delta
+            elif draw_sel == "Arterial":
+                src = cov_art
             else:
-                src  = cov_art if draw_sel == "Arterial" else cov_ven
-                df_c = src[src["covariate"] == cov_sel].copy()
+                src = cov_ven
+            df_c = src[src["covariate"] == cov_sel].copy()
 
             if not df_c.empty:
                 df_c["neg_log10p"] = -np.log10(df_c["P.Value"].clip(lower=1e-300))
