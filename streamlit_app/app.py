@@ -59,15 +59,26 @@ def load_data():
     ecs       = rd("08_ecs_summary_hits.csv")
     eos8      = rd("08_eos_summary_hits.csv")
     eos9      = rd("09_eos_summary_hits.csv")
-    cov       = rd("05_covariate_results.csv")
-    skin_av   = rd("10_skin_av.csv")
-    skin_kw   = rd("10_skin_surgery_kw.csv")
-    return av, loadings, pca_var, pca_sc, gsea_h, gsea_k, ecs, eos8, eos9, cov, skin_av, skin_kw
+    cov            = rd("05_covariate_results.csv")
+    cov_art        = rd("05_arterial_results.csv")
+    cov_ven        = rd("05_venous_results.csv")
+    surg_art_omni  = rd("05_arterial_surgery_omnibus.csv")
+    surg_art_pw    = rd("05_arterial_surgery_pairwise.csv")
+    surg_ven_omni  = rd("05_venous_surgery_omnibus.csv")
+    surg_ven_pw    = rd("05_venous_surgery_pairwise.csv")
+    delta_surg_omni = rd("06_delta_surgery_omnibus.csv")
+    delta_surg_pw   = rd("06_delta_surgery_pairwise.csv")
+    skin_av        = rd("10_skin_av.csv")
+    skin_kw        = rd("10_skin_surgery_kw.csv")
+    return (av, loadings, pca_var, pca_sc, gsea_h, gsea_k, ecs, eos8, eos9, cov,
+            cov_art, cov_ven, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
+            delta_surg_omni, delta_surg_pw, skin_av, skin_kw)
 
 
 (av, loadings, pca_var, pca_sc,
- gsea_h, gsea_k, ecs_hits, eos8_hits, eos9_hits,
- cov_res, skin_av, skin_kw) = load_data()
+ gsea_h, gsea_k, ecs_hits, eos8_hits, eos9_hits, cov_res,
+ cov_art, cov_ven, surg_art_omni, surg_art_pw, surg_ven_omni, surg_ven_pw,
+ delta_surg_omni, delta_surg_pw, skin_av, skin_kw) = load_data()
 
 # ── Pre-process A-V table ──────────────────────────────────────────────────────
 if not av.empty:
@@ -131,6 +142,19 @@ COL_SRC  = "#e31a1c"
 COL_LE   = "#ff7f00"
 COL_SRCH = "#9400d3"
 SURG_COL = {"Head/Neck": "#66c2a5", "Laparoscopic": "#fc8d62", "Spine": "#8da0cb"}
+
+COV_LABELS = {
+    "obese":         "Obese vs Non-obese",
+    "hypothermia":   "Hypothermia vs Normothermia",
+    "hyperglycemia": "Hyperglycemia vs Normoglycemia",
+    "male":          "Male vs Female",
+}
+CONTRAST_DISPLAY = {
+    "Spine_vs_Laparoscopic":    "Spine vs Laparoscopic",
+    "Spine_vs_HeadNeck":        "Spine vs Head/Neck",
+    "Laparoscopic_vs_HeadNeck": "Laparoscopic vs Head/Neck",
+}
+CONTRAST_LOOKUP = {v: k for k, v in CONTRAST_DISPLAY.items()}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def direction_color(logfc):
@@ -227,8 +251,8 @@ with st.sidebar:
                 unsafe_allow_html=True,
             )
 
-tab_vol, tab_pca, tab_gsea, tab_ecs, tab_skin = st.tabs([
-    "A-V Volcano", "PCA", "GSEA", "ECS / EOS", "Skin Proteases"
+tab_vol, tab_pca, tab_gsea, tab_cov, tab_ecs, tab_skin = st.tabs([
+    "A-V Volcano", "PCA", "GSEA", "Covariate Explorer", "ECS / EOS", "Skin Proteases"
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -503,7 +527,257 @@ with tab_gsea:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Tab 4 — ECS / EOS
+# Tab 4 — Covariate Explorer (A-A and V-V comparisons)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_cov:
+    if cov_art.empty and cov_ven.empty:
+        st.warning("Run `R_scripts/05_covariate_analysis.R` to generate covariate outputs.")
+    else:
+        cc1, cc2, cc3 = st.columns(3)
+        draw_sel     = cc1.selectbox("Compartment", ["Arterial", "Venous", "A-V Delta"],
+                                     key="cov_draw")
+        analysis_sel = cc2.selectbox("Analysis", ["Binary covariate", "Surgery type"],
+                                     key="cov_analysis")
+
+        # ── Binary covariate ──────────────────────────────────────────────────
+        if analysis_sel == "Binary covariate":
+            cov_sel = cc3.selectbox("Covariate", list(COV_LABELS.keys()),
+                                    format_func=lambda x: COV_LABELS[x], key="cov_cov")
+
+            if draw_sel == "A-V Delta":
+                st.info("Binary covariate analysis on the A-V delta is in `06_delta_results.csv` "
+                        "— not yet wired into this view. Select Arterial or Venous.")
+                df_c = pd.DataFrame()
+            else:
+                src  = cov_art if draw_sel == "Arterial" else cov_ven
+                df_c = src[src["covariate"] == cov_sel].copy()
+
+            if not df_c.empty:
+                df_c["neg_log10p"] = -np.log10(df_c["P.Value"].clip(lower=1e-300))
+                df_c["sig"]  = np.where(df_c["adj.P.Val"] < 0.05, "FDR < 0.05",
+                               np.where(df_c["P.Value"]   < 0.05, "p < 0.05", "NS"))
+                df_c["_hi"]  = df_c["EntrezGeneSymbol"].str.upper().isin(searched)
+                n_pos = int(df_c["n_pos"].iloc[0]); n_neg = int(df_c["n_neg"].iloc[0])
+
+                label_pos, label_neg = COV_LABELS[cov_sel].split(" vs ")
+                x_label = f"log2FC ({label_pos} / {label_neg})  [n={n_pos} vs {n_neg}]"
+                n_nom = (df_c["P.Value"] < 0.05).sum()
+                n_fdr = (df_c["adj.P.Val"] < 0.05).sum()
+                st.caption(f"**{draw_sel}** · {COV_LABELS[cov_sel]} · "
+                           f"{n_nom:,} nominal hits · {n_fdr} FDR hits")
+
+                col_map_c = {"FDR < 0.05": "#ff7f00", "p < 0.05": COL_NOM,
+                             "NS": COL_NS, "Searched": COL_SRC}
+                fig_c = go.Figure()
+                for grp in ["NS", "p < 0.05", "FDR < 0.05"]:
+                    sub = df_c[(df_c["sig"] == grp) & ~df_c["_hi"]]
+                    if sub.empty: continue
+                    tip = ("<b>" + sub["Target"].fillna("") + "</b> ("
+                           + sub["EntrezGeneSymbol"].fillna("") + ")<br>"
+                           + "logFC: " + sub["logFC"].round(3).astype(str) + "<br>"
+                           + "p = " + sub["P.Value"].map(lambda x: f"{x:.3g}") + "<br>"
+                           + "adj.p = " + sub["adj.P.Val"].map(lambda x: f"{x:.3g}"))
+                    fig_c.add_trace(go.Scatter(
+                        x=sub["logFC"], y=sub["neg_log10p"], mode="markers", name=grp,
+                        text=tip, hoverinfo="text",
+                        marker=dict(color=col_map_c[grp],
+                                    size=5 if grp != "NS" else 3,
+                                    opacity=0.8 if grp != "NS" else 0.2)))
+                hi = df_c[df_c["_hi"]]
+                if not hi.empty:
+                    tip_hi = ("<b>" + hi["Target"].fillna("") + "</b> ("
+                              + hi["EntrezGeneSymbol"].fillna("") + ")<br>"
+                              + "logFC: " + hi["logFC"].round(3).astype(str) + "<br>"
+                              + "p = " + hi["P.Value"].map(lambda x: f"{x:.3g}"))
+                    fig_c.add_trace(go.Scatter(
+                        x=hi["logFC"], y=hi["neg_log10p"], mode="markers", name="Searched",
+                        text=tip_hi, hoverinfo="text",
+                        marker=dict(color=COL_SRC, size=10, opacity=1.0)))
+                    for _, r in hi.iterrows():
+                        fig_c.add_annotation(x=r["logFC"], y=r["neg_log10p"],
+                                             text=r["EntrezGeneSymbol"], showarrow=True,
+                                             arrowhead=2, font=dict(size=11, color=COL_SRC),
+                                             bgcolor="white", bordercolor=COL_SRC)
+                fig_c.add_hline(y=-np.log10(0.05), line_dash="dot",
+                                line_color=COL_NOM, line_width=1)
+                fig_c.add_vline(x=0, line_dash="dot", line_color="gray", line_width=1)
+                fig_c.update_layout(
+                    title=f"{draw_sel}: {COV_LABELS[cov_sel]}",
+                    xaxis_title=x_label,
+                    yaxis_title="−log10(p-value)",
+                    height=500, margin=dict(t=50, b=40),
+                    hovermode="closest",
+                )
+                st.plotly_chart(fig_c, use_container_width=True)
+
+                st.markdown("**Top hits (p < 0.05)**")
+                top_c = (df_c[df_c["P.Value"] < 0.05]
+                         .sort_values("P.Value")
+                         .head(200)
+                         [["EntrezGeneSymbol", "Target", "logFC", "P.Value", "adj.P.Val"]]
+                         .rename(columns={"EntrezGeneSymbol": "Gene", "Target": "Protein",
+                                          "P.Value": "p", "adj.P.Val": "adj.p"})
+                         .assign(logFC=lambda d: d["logFC"].round(3),
+                                 p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
+                                 **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}))
+                st.dataframe(top_c, use_container_width=True, hide_index=True)
+
+        # ── Surgery type ──────────────────────────────────────────────────────
+        else:
+            surg_view = cc3.selectbox(
+                "View",
+                ["Omnibus F-test"] + list(CONTRAST_DISPLAY.values()),
+                key="cov_surg"
+            )
+
+            if draw_sel == "Arterial":
+                omni_df, pw_df = surg_art_omni, surg_art_pw
+            elif draw_sel == "Venous":
+                omni_df, pw_df = surg_ven_omni, surg_ven_pw
+            else:
+                omni_df, pw_df = delta_surg_omni, delta_surg_pw
+
+            if surg_view == "Omnibus F-test":
+                if omni_df.empty:
+                    st.info("No omnibus data available.")
+                else:
+                    df_omni = omni_df.copy()
+                    df_omni["neg_log10p"] = -np.log10(df_omni["P.Value"].clip(lower=1e-300))
+                    n_hits = (df_omni["P.Value"] < 0.05).sum()
+                    st.caption(f"**{draw_sel}** · Surgery type omnibus F-test · "
+                               f"{n_hits:,} hits at p < 0.05")
+
+                    top30 = df_omni.nsmallest(30, "P.Value").copy()
+                    top30["label"] = top30["Target"].fillna(top30["AptName"])
+                    top30["_hi"]   = top30["EntrezGeneSymbol"].str.upper().isin(searched)
+                    top30["color"] = top30["_hi"].map(
+                        lambda v: COL_SRC if v else COL_NOM)
+
+                    tip_o = (
+                        "<b>" + top30["Target"].fillna("") + "</b> ("
+                        + top30["EntrezGeneSymbol"].fillna("") + ")<br>"
+                        + "F = " + top30["F"].round(2).astype(str) + "<br>"
+                        + "p = " + top30["P.Value"].map(lambda x: f"{x:.3g}") + "<br>"
+                        + "Spine vs Lap logFC: "
+                        + top30["Spine_vs_Laparoscopic"].round(3).astype(str) + "<br>"
+                        + "Spine vs H/N logFC: "
+                        + top30["Spine_vs_HeadNeck"].round(3).astype(str) + "<br>"
+                        + "Lap vs H/N logFC: "
+                        + top30["Laparoscopic_vs_HeadNeck"].round(3).astype(str)
+                    )
+                    fig_omni = go.Figure(go.Bar(
+                        x=top30["neg_log10p"],
+                        y=top30["label"],
+                        orientation="h",
+                        marker_color=top30["color"].tolist(),
+                        text=tip_o, hoverinfo="text",
+                    ))
+                    fig_omni.add_vline(x=-np.log10(0.05), line_dash="dot",
+                                       line_color=COL_NOM, line_width=1)
+                    fig_omni.update_layout(
+                        title=f"{draw_sel}: Surgery type omnibus — top 30 proteins",
+                        xaxis_title="−log10(p-value)",
+                        yaxis=dict(autorange="reversed", tickfont=dict(size=10)),
+                        height=max(450, len(top30) * 20 + 80),
+                        margin=dict(l=160, t=50),
+                    )
+                    st.plotly_chart(fig_omni, use_container_width=True)
+
+                    st.markdown("**Full omnibus results (p < 0.05)**")
+                    disp_o = (df_omni[df_omni["P.Value"] < 0.05]
+                              .sort_values("P.Value")
+                              [["EntrezGeneSymbol", "Target", "F", "P.Value", "adj.P.Val",
+                                "Spine_vs_Laparoscopic", "Spine_vs_HeadNeck",
+                                "Laparoscopic_vs_HeadNeck"]]
+                              .rename(columns={
+                                  "EntrezGeneSymbol": "Gene", "Target": "Protein",
+                                  "P.Value": "p", "adj.P.Val": "adj.p",
+                                  "Spine_vs_Laparoscopic": "logFC Spine/Lap",
+                                  "Spine_vs_HeadNeck": "logFC Spine/H-N",
+                                  "Laparoscopic_vs_HeadNeck": "logFC Lap/H-N"})
+                              .assign(F=lambda d: d["F"].round(2),
+                                      p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
+                                      **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}"),
+                                         "logFC Spine/Lap": lambda d: d["logFC Spine/Lap"].round(3),
+                                         "logFC Spine/H-N": lambda d: d["logFC Spine/H-N"].round(3),
+                                         "logFC Lap/H-N":   lambda d: d["logFC Lap/H-N"].round(3)}))
+                    st.dataframe(disp_o, use_container_width=True, hide_index=True)
+
+            else:
+                ct_key = CONTRAST_LOOKUP[surg_view]
+                df_pw  = pw_df[pw_df["contrast"] == ct_key].copy()
+
+                if df_pw.empty:
+                    st.info("No pairwise data available.")
+                else:
+                    df_pw["neg_log10p"] = -np.log10(df_pw["P.Value"].clip(lower=1e-300))
+                    df_pw["sig"]  = np.where(df_pw["adj.P.Val"] < 0.05, "FDR < 0.05",
+                                    np.where(df_pw["P.Value"]   < 0.05, "p < 0.05", "NS"))
+                    df_pw["_hi"]  = df_pw["EntrezGeneSymbol"].str.upper().isin(searched)
+                    n_nom = (df_pw["P.Value"] < 0.05).sum()
+                    n_fdr = (df_pw["adj.P.Val"] < 0.05).sum()
+                    st.caption(f"**{draw_sel}** · {surg_view} · "
+                               f"{n_nom:,} nominal hits · {n_fdr} FDR hits")
+
+                    col_map_pw = {"FDR < 0.05": "#ff7f00", "p < 0.05": COL_NOM,
+                                  "NS": COL_NS, "Searched": COL_SRC}
+                    fig_pw = go.Figure()
+                    for grp in ["NS", "p < 0.05", "FDR < 0.05"]:
+                        sub = df_pw[(df_pw["sig"] == grp) & ~df_pw["_hi"]]
+                        if sub.empty: continue
+                        tip = ("<b>" + sub["Target"].fillna("") + "</b> ("
+                               + sub["EntrezGeneSymbol"].fillna("") + ")<br>"
+                               + "logFC: " + sub["logFC"].round(3).astype(str) + "<br>"
+                               + "p = " + sub["P.Value"].map(lambda x: f"{x:.3g}"))
+                        fig_pw.add_trace(go.Scatter(
+                            x=sub["logFC"], y=sub["neg_log10p"], mode="markers", name=grp,
+                            text=tip, hoverinfo="text",
+                            marker=dict(color=col_map_pw[grp],
+                                        size=5 if grp != "NS" else 3,
+                                        opacity=0.8 if grp != "NS" else 0.2)))
+                    hi = df_pw[df_pw["_hi"]]
+                    if not hi.empty:
+                        tip_hi = ("<b>" + hi["Target"].fillna("") + "</b> ("
+                                  + hi["EntrezGeneSymbol"].fillna("") + ")<br>"
+                                  + "logFC: " + hi["logFC"].round(3).astype(str) + "<br>"
+                                  + "p = " + hi["P.Value"].map(lambda x: f"{x:.3g}"))
+                        fig_pw.add_trace(go.Scatter(
+                            x=hi["logFC"], y=hi["neg_log10p"], mode="markers", name="Searched",
+                            text=tip_hi, hoverinfo="text",
+                            marker=dict(color=COL_SRC, size=10, opacity=1.0)))
+                        for _, r in hi.iterrows():
+                            fig_pw.add_annotation(x=r["logFC"], y=r["neg_log10p"],
+                                                  text=r["EntrezGeneSymbol"], showarrow=True,
+                                                  arrowhead=2, font=dict(size=11, color=COL_SRC),
+                                                  bgcolor="white", bordercolor=COL_SRC)
+                    fig_pw.add_hline(y=-np.log10(0.05), line_dash="dot",
+                                     line_color=COL_NOM, line_width=1)
+                    fig_pw.add_vline(x=0, line_dash="dot", line_color="gray", line_width=1)
+                    parts = surg_view.split(" vs ")
+                    fig_pw.update_layout(
+                        title=f"{draw_sel}: {surg_view}",
+                        xaxis_title=f"log2FC ({parts[0]} / {parts[1]})",
+                        yaxis_title="−log10(p-value)",
+                        height=500, margin=dict(t=50, b=40),
+                        hovermode="closest",
+                    )
+                    st.plotly_chart(fig_pw, use_container_width=True)
+
+                    st.markdown("**Top hits (p < 0.05)**")
+                    top_pw = (df_pw[df_pw["P.Value"] < 0.05]
+                              .sort_values("P.Value")
+                              .head(200)
+                              [["EntrezGeneSymbol", "Target", "logFC", "P.Value", "adj.P.Val"]]
+                              .rename(columns={"EntrezGeneSymbol": "Gene", "Target": "Protein",
+                                               "P.Value": "p", "adj.P.Val": "adj.p"})
+                              .assign(logFC=lambda d: d["logFC"].round(3),
+                                      p=lambda d: d["p"].map(lambda x: f"{x:.3g}"),
+                                      **{"adj.p": lambda d: d["adj.p"].map(lambda x: f"{x:.3g}")}))
+                    st.dataframe(top_pw, use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tab 5 — ECS / EOS
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_ecs:
     if ecs_eos.empty:
