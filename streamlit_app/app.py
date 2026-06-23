@@ -44,7 +44,7 @@ _candidates = [
 DATA_DIR = next((p.resolve() for p in _candidates if p.exists()), _candidates[0].resolve())
 
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_data():
     def rd(name):
         p = DATA_DIR / name
